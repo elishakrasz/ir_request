@@ -1,6 +1,11 @@
 # Phase 1 (schema provisioning) + Phase 2 (ingestion)
 requests>=2.31
 
+# Dashboard (Phase 4)
+streamlit>=1.36
+plotly>=5.22
+pandas>=2.2
+
 # Tests
 pytest>=8
 
