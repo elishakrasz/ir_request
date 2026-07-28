@@ -155,7 +155,7 @@ The classifier stub ships inside Phase 2; wiring a real LLM backend is a separat
 
 Layout (one main per-opportunity page plus two auxiliary pages — review queue and firm overview):
 
-1. **Sidebar:** Opportunity selector (live opps, searchable); date-range filter; channel/direction filters.
+1. **Sidebar:** **Fund selector** (opportunity's `mint_fundorspv` lookup → `mint_investmentproduct`; logical name configurable via `FUND_LOOKUP`) AND Opportunity selector (live opps, searchable); date-range filter; channel/direction filters. Opportunities in this org are per-investor-per-fund, so a fund selection means "all opportunities on that fund".
 2. **KPI row (st.metric × 4):** % of connected Contacts engaged in last 30 days; open + overdue RFI counts; median our-response-time (30d); days since last activity on the deal.
 3. **Contact health table** (main working queue): contact, role, last inbound, last outbound, days-since-last-touch, 30d message count, open RFIs, RAG chip (Green ≤7 days since touch, Amber 8–21, Red >21 or any Overdue RFI — thresholds in config). Sorted stalest-first. Row click → drill-down.
 4. **Timeline:** interleaved signals for the opportunity, newest first — icon for channel, arrow for direction, subject + snippet expander, RFI badge.
@@ -163,6 +163,7 @@ Layout (one main per-opportunity page plus two auxiliary pages — review queue 
 6. **Alerts strip (top, only when non-empty):** overdue RFIs; contacts silent > threshold; never-contacted contacts on the selected deal; count of items in the review queue.
 7. **Review queue page:** all Suggested/Unmatched signals with the top candidate opportunity (and runner-up where available), sender, snippet, source link — one-click assign or exclude. Manual assignments teach the matcher via thread inheritance.
 8. **Firm overview page:** cross-opportunity risk table — open/overdue requests, unanswered inbound count, days since last meaningful contact, review-queue count per deal — sorted worst-first. This stands in for a management Power BI dashboard for now.
+9. **Fund cohort view (explicit requirement, 2026-07-28):** pick a fund + a date range → ALL signals in that window from contacts connected to any of the fund's opportunities — **cohort-based, independent of per-email match status** (fund → opportunities → connected contacts → signals by contact + timestamp). This must be complete even when individual emails are still Suggested/Unmatched, because it filters on the contact set, not on the per-message opportunity assignment. Show per-contact rollups and the interleaved timeline for the cohort.
 
 Keep 7/30-day computations in pandas on the queried signal rows (don't rely on rollups for windows), and compute **all engagement KPIs over `ismeaningful=true`, non-Excluded signals only** — newsletters and auto-replies must never count as engagement. **Opportunity-level counts must dedupe on `messagekeyhash`**: one message matched to three contacts is three rows but one communication; contact-level metrics use the per-contact rows as-is. Include `dashboard/README.md` with run instructions (`streamlit run dashboard/app.py`) and a note that auth hardening (App Service + Easy Auth) is a deployment-time task.
 

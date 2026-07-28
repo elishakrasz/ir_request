@@ -20,6 +20,7 @@ def cfg():
         mailboxes=["ir@exigentcap.com"],
         choices=Choices(100000000),
         ingest_floor=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        fund_lookup="mint_fundorspv",
         rfi_due_bdays=2,
         rfi_reply_status="WaitingExternal",
         rules=Rules.load(Path(__file__).parent.parent / "rules.json"),
@@ -79,7 +80,7 @@ class FakeDataverse:
         self._n = 0
 
     # scope
-    def fetch_opportunities(self):
+    def fetch_opportunities(self, fund_lookup="mint_fundorspv"):
         return [dict(r) for r in OPP_ROWS]
 
     def fetch_connections(self):

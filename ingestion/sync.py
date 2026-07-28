@@ -66,12 +66,17 @@ def build_scope(opp_rows, conn_rows, contact_rows, roles_by_id=None, allowed_rol
         aliases = [a.strip() for a in (o.get("new_aliases") or "").replace(",", "\n").split("\n")
                    if a.strip()]
         start = o.get("new_monitoringstartdate")
+        fund_key = next((k for k in o if k.startswith("_") and k.endswith("_value")
+                         and "fundorspv" in k), None)
         opp_meta[o["opportunityid"]] = {
             "name": o.get("name") or "",
             "oppcode": o.get("new_oppcode") or "",
             "aliases": aliases,
             "active": bool(o.get("new_activemonitoring")),
             "startdate": parse_ts(start) if start else None,
+            "fund": o.get(fund_key) if fund_key else None,
+            "fund_name": o.get(f"{fund_key}@OData.Community.Display.V1.FormattedValue", "")
+            if fund_key else "",
         }
     for o in opp_rows:
         link(o.get("_parentcontactid_value"), o["opportunityid"])
@@ -324,7 +329,7 @@ class SyncRun:
         if cfg.rules.connection_roles:
             roles_by_id = {r["connectionroleid"]: r.get("name", "")
                            for r in self.dv.fetch_connection_roles()}
-        opp_rows = self.dv.fetch_opportunities()
+        opp_rows = self.dv.fetch_opportunities(cfg.fund_lookup)
         conn_rows = self.dv.fetch_connections()
         contact_ids = {o.get("_parentcontactid_value") for o in opp_rows}
         for cn in conn_rows:

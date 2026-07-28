@@ -72,6 +72,7 @@ class Config:
     mailboxes: list
     choices: Choices
     ingest_floor: datetime
+    fund_lookup: str  # opportunity→fund lookup logical name (Exigent: mint_fundorspv)
     rfi_due_bdays: int
     rfi_reply_status: str
     rules: Rules
@@ -93,6 +94,7 @@ class Config:
             mailboxes=[m.strip().lower() for m in env["MAILBOXES"].split(",") if m.strip()],
             choices=Choices(int(env.get("CHOICE_VALUE_BASE", "100000000"))),
             ingest_floor=datetime.fromisoformat(floor).replace(tzinfo=timezone.utc),
+            fund_lookup=env.get("FUND_LOOKUP", "mint_fundorspv"),
             rfi_due_bdays=int(env.get("RFI_DUE_BDAYS", "2")),
             rfi_reply_status=env.get("RFI_REPLY_STATUS", "WaitingExternal"),
             rules=Rules.load(Path(env.get("RULES_PATH", Path(__file__).parent / "rules.json"))),

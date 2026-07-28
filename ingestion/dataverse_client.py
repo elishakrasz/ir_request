@@ -55,8 +55,7 @@ class DataverseClient:
     def query(self, path: str) -> list[dict]:
         """GET a collection, following @odata.nextLink."""
         rows, url = [], path
-        prefer = ('odata.maxpagesize=5000,'
-                  'odata.include-annotations="Microsoft.Dynamics.CRM.lookuplogicalname"')
+        prefer = 'odata.maxpagesize=5000,odata.include-annotations="*"'
         while url:
             r = self._req("GET", url, headers={"Prefer": prefer})
             r.raise_for_status()
@@ -67,12 +66,13 @@ class DataverseClient:
         return rows
 
     # ── scope reads (spec step 1) ────────────────────────────────────────────
-    def fetch_opportunities(self) -> list[dict]:
+    def fetch_opportunities(self, fund_lookup: str = "mint_fundorspv") -> list[dict]:
         p = self.p
         return self.query(
             "opportunities?$select=opportunityid,name,"
             f"{p}oppcode,{p}aliases,{p}activemonitoring,{p}monitoringstartdate,"
-            "_parentcontactid_value,_customerid_value&$filter=statecode eq 0")
+            f"_parentcontactid_value,_customerid_value,_{fund_lookup}_value"
+            "&$filter=statecode eq 0")
 
     def fetch_connections(self) -> list[dict]:
         # contact objecttypecode 2, opportunity 3; live connections only
