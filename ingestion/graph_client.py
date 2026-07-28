@@ -42,8 +42,9 @@ class GraphClient:
         for attempt in range(6):
             r = self.s.get(url, headers=h, timeout=120)
             if r.status_code in (429, 503, 504):
-                wait = int(r.headers.get("Retry-After", 2 ** attempt))
-                time.sleep(min(wait, 120))
+                wait = min(int(r.headers.get("Retry-After", 2 ** attempt)), 120)
+                print(f"[graph] {r.status_code} — waiting {wait}s", flush=True)
+                time.sleep(wait)
                 continue
             if r.status_code == 401 and attempt == 0:  # token edge-expiry
                 self._token = None

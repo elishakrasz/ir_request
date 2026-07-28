@@ -19,7 +19,7 @@ api = cfg.dataverse_url + "/api/data/v9.2"
 p = cfg.prefix
 
 n = int(requests.get(f"{api}/{p}engagementsignals/$count", headers=h,
-                     timeout=60).text.lstrip("﻿"))
+                     timeout=60).content.decode("utf-8-sig").strip())
 rows = requests.get(f"{api}/{p}engagementsignals?$select=createdon"
                     "&$orderby=createdon asc&$top=1", headers=h,
                     timeout=60).json()["value"]

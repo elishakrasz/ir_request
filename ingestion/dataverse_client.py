@@ -47,7 +47,9 @@ class DataverseClient:
                                headers={"Authorization": f"Bearer {self._tok()}",
                                         **kw.pop("headers", {})}, **kw)
             if r.status_code == 429:
-                time.sleep(min(int(r.headers.get("Retry-After", 2 ** attempt)), 120))
+                wait = min(int(r.headers.get("Retry-After", 2 ** attempt)), 120)
+                print(f"[dv] 429 — waiting {wait}s", flush=True)
+                time.sleep(wait)
                 continue
             return r
         return r
@@ -108,8 +110,8 @@ class DataverseClient:
         """{conversationId: opportunityid} from already-Confirmed signals."""
         p, out = self.p, {}
         ids = [c for c in set(conv_ids) if c]
-        for i in range(0, len(ids), 10):
-            flt = " or ".join(f"{p}conversationid eq '{c}'" for c in ids[i:i + 10])
+        for i in range(0, len(ids), 20):
+            flt = " or ".join(f"{p}conversationid eq '{c}'" for c in ids[i:i + 20])
             rows = self.query(
                 f"{p}engagementsignals?$select={p}conversationid,"
                 f"_{p}opportunity_value&$filter=({flt}) and "

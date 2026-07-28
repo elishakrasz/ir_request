@@ -31,6 +31,11 @@ STABLE_FIELDS = ("name", "sender", "timestamputc", "conversationid", "sourcelink
                  "participants", "direction", "snippet", "messagekey", "ismeaningful")
 
 
+def say(msg: str):
+    """Timestamped, flushed progress line — visible in the log while running."""
+    print(f"[{datetime.now(timezone.utc):%H:%M:%S}] {msg}", flush=True)
+
+
 def parse_ts(s: str) -> datetime:
     """Always tz-aware: DateOnly columns (e.g. monitoringstartdate) come back
     as bare dates — treat them as UTC midnight, or comparisons explode."""
@@ -217,8 +222,7 @@ class SyncRun:
             c["excluded"] += 1
             return  # write_excluded=false → write nothing (config-driven)
 
-        contacts = matching.match_contacts(msg["_participants"], email_map,
-                                           cfg.org_domains)
+        contacts = msg["_contacts"]   # precomputed in run()
         if not contacts:
             c["no_contact"] += 1
             return
@@ -352,6 +356,7 @@ class SyncRun:
         c["scope"] = {"opportunities": len(opp_meta), "contacts": len(contact_rows),
                       "emails": len(email_map)}
 
+        say(f"scope: {len(opp_meta)} opps, {len(email_map)} contact emails")
         messages, delta_links = [], {}
         for mb in (mailboxes or cfg.mailboxes):
             for folder in folders:
@@ -360,6 +365,7 @@ class SyncRun:
                 delta_links[(mb, folder)] = link
                 c["mailboxes"][f"{mb}/{folder}"] = {"fetched": len(msgs),
                                                     "resynced": resynced}
+                say(f"delta {mb}/{folder}: {len(msgs)} messages")
                 for m in msgs:
                     m["_mailbox"], m["_folder"] = mb, folder
                     if self._prep(m):
@@ -368,15 +374,29 @@ class SyncRun:
                         c["below_floor"] += 1
 
         messages.sort(key=lambda m: m["_ts"])   # thread inheritance needs order
+        # precompute contact matches; the conv-map query only needs conversations
+        # that involve a matched contact (~2k), not every conversation (~25k)
+        for m in messages:
+            m["_contacts"] = matching.match_contacts(m["_participants"], email_map,
+                                                     cfg.org_domains)
+        convs_needed = sorted({m["conversationId"] for m in messages
+                               if m["_contacts"] and m.get("conversationId")})
+        say(f"conv-map: querying {len(convs_needed)} relevant conversations")
         conv_map = self.dv.confirmed_conv_opps(
-            [m.get("conversationId") for m in messages],
-            cfg.choices.matchstatus["Confirmed"])
+            convs_needed, cfg.choices.matchstatus["Confirmed"])
+        say(f"conv-map: {len(conv_map)} already confirmed; "
+            f"processing {len(messages)} messages")
 
         enrich_cache = {}
-        for m in messages:
+        for i, m in enumerate(messages, 1):
             self._handle(m, opp_meta, email_map, conv_map, enrich_cache)
+            if i % 2000 == 0:
+                say(f"processed {i}/{len(messages)} — "
+                    f"{self.counts['creates']} creates so far")
 
         if self.apply:
+            say(f"creates done ({self.counts['creates']}); "
+                f"latency pass over {len(self.touched_convs)} conversations")
             self._latency_and_answered_pass()
             for (mb, folder), link in delta_links.items():
                 self._save_delta(mb, folder, link)
