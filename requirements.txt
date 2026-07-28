@@ -1,0 +1,4 @@
+# Phase 1 (schema provisioning)
+requests>=2.31
+
+# Phase 2+ (ingestion / dashboard) — added when those phases land

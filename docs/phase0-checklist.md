@@ -93,6 +93,9 @@ Test-ApplicationAccessPolicy -AppId "f3c31b03-e0b8-40eb-8902-d69d6ff3a89a" -Iden
 - [ ] Assign the role to the DEV application user
   - Note: the role can only reference the new tables **after Phase 1 creates them** — create the
     role now with the standard-table privileges, then revisit this box after Phase 1 import.
+- [ ] **Also assign `System Customizer` to the DEV application user** — required so
+      `solution/provision.py` can create the schema app-only (DEV only; PROD app user untouched).
+      May be removed after Phase 1 completes; re-add for future schema changes.
 
 ## 4. Client secret
 
