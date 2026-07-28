@@ -1,0 +1,20 @@
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+
+# Runtime state (delta tokens, run logs)
+ingestion/state/
+state/
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# MSAL token caches
+.msal*cache*.json
+
+# Windows download metadata
+*Zone.Identifier
