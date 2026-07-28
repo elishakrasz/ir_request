@@ -13,6 +13,7 @@ import hashlib
 import json
 import subprocess
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -29,6 +30,18 @@ FOLDERS = ("inbox", "sentitems")
 # later-pass / human updates (no-silent-mutation, house rule 2).
 STABLE_FIELDS = ("name", "sender", "timestamputc", "conversationid", "sourcelink",
                  "participants", "direction", "snippet", "messagekey", "ismeaningful")
+
+
+def clip(s: str, limit: int) -> str:
+    """Truncate to `limit` UTF-16 code units. Dataverse measures string length
+    like .NET — emoji/astral chars count as 2 — so a Python [:N] slice can
+    still overflow the column (found live: 'new_snippet exceeded 2000')."""
+    if not s:
+        return s
+    b = s.encode("utf-16-le")
+    if len(b) <= limit * 2:
+        return s
+    return b[: limit * 2].decode("utf-16-le", "ignore")
 
 
 def say(msg: str):
@@ -125,6 +138,7 @@ class SyncRun:
                        "excluded": 0, "no_contact": 0, "below_floor": 0,
                        "rfi_created": 0, "latency_patched": 0, "answered": 0}
         self.samples = []
+        self.error_samples = []
         self.touched_convs = set()
         self.new_signal_rfis = []   # (signal_id, msg, category)
 
@@ -166,23 +180,23 @@ class SyncRun:
         p, ch = self.cfg.prefix, self.cfg.choices
         key = msg.get("internetMessageId") or msg["id"]
         body = {
-            f"{p}name": (msg.get("subject") or "(no subject)")[:200],
+            f"{p}name": clip(msg.get("subject") or "(no subject)", 200),
             f"{p}channel": ch.channel["Email"],
             f"{p}direction": ch.direction[direction],
             f"{p}timestamputc": msg["_ts"].strftime("%Y-%m-%dT%H:%M:%SZ"),
-            f"{p}sender": msg["_sender"][:320],
-            f"{p}participants": json.dumps(msg["_participants"])[:4000],
-            f"{p}snippet": snippet[:2000],
-            f"{p}conversationid": (msg.get("conversationId") or "")[:512],
-            f"{p}messagekey": key[:512],
+            f"{p}sender": clip(msg["_sender"], 320),
+            f"{p}participants": clip(json.dumps(msg["_participants"]), 4000),
+            f"{p}snippet": clip(snippet, 2000),
+            f"{p}conversationid": clip(msg.get("conversationId") or "", 512),
+            f"{p}messagekey": clip(key, 512),
             f"{p}messagekeyhash": msg["_hash"],
             f"{p}isinforequest": rfi.is_info_request,
             f"{p}rfistatus": ch.rfistatus["Open" if rfi.is_info_request else "NA"],
             f"{p}matchconfidence": conf,
             f"{p}matchstatus": ch.matchstatus[status],
             f"{p}ismeaningful": meaningful,
-            f"{p}sourcelink": (msg.get("webLink") or "")[:2000],
-            f"{p}provenance": f"{mailbox}|{self.runid}|{self.codeversion}"[:512],
+            f"{p}sourcelink": clip(msg.get("webLink") or "", 2000),
+            f"{p}provenance": clip(f"{mailbox}|{self.runid}|{self.codeversion}", 512),
             f"{p}contact@odata.bind": f"/contacts({cid})",
         }
         if method:
@@ -282,7 +296,7 @@ class SyncRun:
     def _create_rfi(self, signal_row, msg, rfi, cid, oppid):
         p, ch, cfg = self.cfg.prefix, self.cfg.choices, self.cfg
         body = {
-            f"{p}name": (msg.get("subject") or "(no subject)")[:200],
+            f"{p}name": clip(msg.get("subject") or "(no subject)", 200),
             f"{p}status": ch.req_status["New"],
             f"{p}category": ch.req_category.get(rfi.category or "Other",
                                                 ch.req_category["Other"]),
@@ -358,10 +372,16 @@ class SyncRun:
 
         say(f"scope: {len(opp_meta)} opps, {len(email_map)} contact emails")
         messages, delta_links = [], {}
-        for mb in (mailboxes or cfg.mailboxes):
-            for folder in folders:
-                msgs, link, resynced = self.graph.delta_messages(
-                    mb, folder, self._load_delta(mb, folder))
+        pairs = [(mb, f) for mb in (mailboxes or cfg.mailboxes) for f in folders]
+
+        def walk(pair):
+            mb, folder = pair
+            # one Graph client per worker — requests.Session isn't thread-safe
+            g = self.graph.clone() if hasattr(self.graph, "clone") else self.graph
+            return pair, g.delta_messages(mb, folder, self._load_delta(mb, folder))
+
+        with ThreadPoolExecutor(max_workers=min(8, len(pairs))) as ex:
+            for (mb, folder), (msgs, link, resynced) in ex.map(walk, pairs):
                 delta_links[(mb, folder)] = link
                 c["mailboxes"][f"{mb}/{folder}"] = {"fetched": len(msgs),
                                                     "resynced": resynced}
@@ -389,21 +409,35 @@ class SyncRun:
 
         enrich_cache = {}
         for i, m in enumerate(messages, 1):
-            self._handle(m, opp_meta, email_map, conv_map, enrich_cache)
+            try:
+                self._handle(m, opp_meta, email_map, conv_map, enrich_cache)
+            except Exception as e:   # one bad row must never kill a 2h run
+                c["errors"] = c.get("errors", 0) + 1
+                self.error_samples.append(f"{m.get('id', '?')}: {e}")
+                if c["errors"] <= 5:
+                    say(f"ERROR on message {m.get('id', '?')[:24]}: {str(e)[:300]}")
             if i % 2000 == 0:
                 say(f"processed {i}/{len(messages)} — "
                     f"{self.counts['creates']} creates so far")
 
         if self.apply:
-            say(f"creates done ({self.counts['creates']}); "
+            say(f"creates done ({self.counts['creates']}, "
+                f"{c.get('errors', 0)} errors); "
                 f"latency pass over {len(self.touched_convs)} conversations")
             self._latency_and_answered_pass()
-            for (mb, folder), link in delta_links.items():
-                self._save_delta(mb, folder, link)
+            if c.get("errors"):
+                # skipped messages would be lost forever if tokens advance —
+                # leave them unsaved so the next (idempotent) run retries all
+                say(f"{c['errors']} errors — delta tokens NOT advanced; "
+                    "next run re-walks and retries (idempotent)")
+            else:
+                for (mb, folder), link in delta_links.items():
+                    self._save_delta(mb, folder, link)
 
         log = {"runid": self.runid, "apply": self.apply,
                "codeversion": self.codeversion, "counts": c,
-               "samples": self.samples, "dv_intents": len(self.dv.intents)}
+               "samples": self.samples, "errors": self.error_samples[:20],
+               "dv_intents": len(self.dv.intents)}
         runs = self.state_dir / "runs"
         runs.mkdir(parents=True, exist_ok=True)
         (runs / f"{self.runid}.json").write_text(json.dumps(log, indent=2, default=str))

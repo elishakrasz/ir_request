@@ -21,6 +21,10 @@ class GraphClient:
         self._token, self._exp = None, 0.0
         self.s = requests.Session()
 
+    def clone(self) -> "GraphClient":
+        """Fresh client (own Session + token) for a parallel walk worker."""
+        return GraphClient(self._tenant, self._cid, self._secret)
+
     def _tok(self) -> str:
         if self._token and time.time() < self._exp - 60:
             return self._token

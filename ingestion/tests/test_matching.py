@@ -80,6 +80,17 @@ def test_dateonly_monitoringstartdate_regression():
     assert (oid, method, status) == ("o1", "ContactMatch", "Confirmed")
 
 
+def test_clip_counts_utf16_units_like_dataverse():
+    """Dataverse rejected a 2000-codepoint snippet containing emoji (astral
+    chars = 2 UTF-16 units). clip() must bound UTF-16 length, not len()."""
+    from ingestion.sync import clip
+    s = "x" * 1999 + "😀"          # len()==2000 but 2001 UTF-16 units
+    out = clip(s, 2000)
+    assert len(out.encode("utf-16-le")) // 2 <= 2000
+    assert clip("short", 2000) == "short"
+    assert clip("", 10) == ""
+
+
 def test_autoreply_subject_and_sender(cfg):
     assert looks_autoreply("Automatic reply: hi", "anna@lpfund.com", cfg.rules)
     assert looks_autoreply("hi", "no-reply@bank.com", cfg.rules)
