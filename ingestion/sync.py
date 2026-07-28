@@ -243,6 +243,14 @@ class SyncRun:
         for cid, oppids in contacts.items():
             oppid, method, conf, status = matching.resolve_opportunity(
                 msg["_ts"], subject, snippet, oppids, opp_meta, conv_map.get(conv))
+            c.setdefault("by_status", {}).setdefault(status, 0)
+            c["by_status"][status] += 1
+            c.setdefault("by_method", {}).setdefault(method or "none", 0)
+            c["by_method"][method or "none"] += 1
+            if oppid and opp_meta.get(oppid, {}).get("fund_name"):
+                fn = opp_meta[oppid]["fund_name"]
+                c.setdefault("by_fund", {}).setdefault(fn, 0)
+                c["by_fund"][fn] += 1
             payload = self._payload(msg, cid, oppid, method, conf, status, direction,
                                     meaningful, snippet, msg["_mailbox"], rfi)
             existing = self.dv.get_signal(msg["_hash"], cid)
