@@ -7,6 +7,9 @@
 ingestion/state/
 state/
 
+# Solution build artifacts (regenerate via solution/export.sh)
+solution/build/
+
 # Python
 __pycache__/
 *.pyc
