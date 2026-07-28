@@ -32,7 +32,10 @@ STABLE_FIELDS = ("name", "sender", "timestamputc", "conversationid", "sourcelink
 
 
 def parse_ts(s: str) -> datetime:
-    return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    """Always tz-aware: DateOnly columns (e.g. monitoringstartdate) come back
+    as bare dates — treat them as UTC midnight, or comparisons explode."""
+    dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
 def add_business_days(d: datetime, n: int) -> datetime:

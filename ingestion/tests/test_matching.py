@@ -68,6 +68,18 @@ def test_internal_participants_never_match():
     assert match_contacts(["ir@exigentcap.com"], email_map, ORG) == {}
 
 
+def test_dateonly_monitoringstartdate_regression():
+    """Dataverse DateOnly columns return bare dates ('2026-01-01') — build_scope
+    must yield tz-aware datetimes or resolve_opportunity crashes (found live)."""
+    from ingestion.sync import build_scope
+    opp_meta, _ = build_scope(
+        [{"opportunityid": "o1", "name": "X", "new_activemonitoring": True,
+          "new_monitoringstartdate": "2026-01-01"}], [], [])
+    oid, method, conf, status = resolve_opportunity(
+        T, "hello", "", {"o1"}, opp_meta, conv_opp=None)
+    assert (oid, method, status) == ("o1", "ContactMatch", "Confirmed")
+
+
 def test_autoreply_subject_and_sender(cfg):
     assert looks_autoreply("Automatic reply: hi", "anna@lpfund.com", cfg.rules)
     assert looks_autoreply("hi", "no-reply@bank.com", cfg.rules)
