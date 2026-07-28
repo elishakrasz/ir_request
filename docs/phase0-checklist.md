@@ -13,10 +13,17 @@ fill in the remaining values at the bottom and Phase 1 (DEV schema) can start.
 
 ## 1. Extend the existing Entra app registration
 
-- [ ] Entra admin center → App registrations → the prospect-pipeline app (`f3c31b03…`) →
-      **API permissions → Add a permission → Microsoft Graph → Application permissions →
-      `Mail.Read`**. Nothing else — no Dataverse `user_impersonation` (server-to-server Dataverse
-      uses an application user + security role, section 3).
+> **CORRECTION (2026-07-28, found by live verification):** with the preferred App RBAC path (2a),
+> do **NOT** grant `Mail.Read` as an Entra application permission. An Entra-granted application
+> permission is tenant-wide and Exchange App RBAC **cannot restrict it** (RBAC grants, it never
+> restricts — only legacy `ApplicationAccessPolicy` restricts an Entra grant). With App RBAC,
+> mail access comes *solely* from the scoped Exchange role assignment. Grant `Mail.Read` in Entra
+> **only** if using the legacy AAP fallback (2b).
+
+- [ ] **App RBAC path (2a):** ensure the app has **no** `Mail.Read` application permission in
+      Entra (API permissions blade — remove it if present; removal drops its admin consent too).
+      No Dataverse `user_impersonation` either (server-to-server Dataverse uses an application
+      user + security role, section 3).
 - [ ] Record the app's **service principal Object ID** (Entra → Enterprise applications → the app
       → Object ID). Needed for Exchange RBAC below — this is the *enterprise app* object id,
       **not** the app-registration object id.
@@ -77,7 +84,8 @@ Test-ApplicationAccessPolicy -AppId "f3c31b03-e0b8-40eb-8902-d69d6ff3a89a" -Iden
 
 ## 3. Admin consent + Dataverse application user (DEV)
 
-- [ ] App registration → **API permissions → Grant admin consent for Exigent** (Graph `Mail.Read`)
+- [ ] Admin consent: **only relevant on the AAP fallback path (2b)** — on the App RBAC path there
+      is no Entra `Mail.Read` grant to consent to (see correction in section 1)
 - [ ] Power Platform admin center → **DEV environment** → Settings → Users + permissions →
       **Application users → + New app user** → pick the app, choose the root business unit.
       (The app is presumably already an application user in PROD for the prospect pipeline —

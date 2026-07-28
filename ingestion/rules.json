@@ -1,0 +1,15 @@
+{
+  "_comment": "Config-driven exclusion + auto-reply detection rules (spec Phase 2 step 5). Operator-editable; matching is case-insensitive.",
+  "excluded_senders": [],
+  "excluded_domains": [],
+  "excluded_keywords": ["unsubscribe", "privileged & confidential - legal"],
+  "write_excluded": false,
+  "autoreply_subject_prefixes": [
+    "automatic reply:", "auto reply:", "autoreply", "out of office",
+    "undeliverable:", "delivery has failed", "delivery status notification"
+  ],
+  "autoreply_sender_patterns": [
+    "no-reply@", "noreply@", "do-not-reply@", "mailer-daemon@", "postmaster@"
+  ],
+  "connection_roles": []
+}

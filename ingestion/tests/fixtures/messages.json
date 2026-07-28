@@ -1,0 +1,72 @@
+[
+  {
+    "id": "msg-001",
+    "internetMessageId": "<inv-thread-1@lpfund.com>",
+    "conversationId": "conv-A",
+    "subject": "Question on Q2 capital account statement",
+    "bodyPreview": "Hi team, could you send the Q2 capital account statement for Fund II?",
+    "from": {"emailAddress": {"address": "anna.lp@lpfund.com"}},
+    "toRecipients": [{"emailAddress": {"address": "ir@exigentcap.com"}}],
+    "ccRecipients": [],
+    "bccRecipients": [],
+    "sentDateTime": "2026-07-20T09:00:00Z",
+    "receivedDateTime": "2026-07-20T09:00:05Z",
+    "webLink": "https://outlook.office365.com/owa/?ItemID=msg-001"
+  },
+  {
+    "id": "msg-002",
+    "internetMessageId": "<inv-thread-1-reply@exigentcap.com>",
+    "conversationId": "conv-A",
+    "subject": "RE: Question on Q2 capital account statement",
+    "bodyPreview": "Hi Anna, attached the statement you asked for.",
+    "from": {"emailAddress": {"address": "ir@exigentcap.com"}},
+    "toRecipients": [{"emailAddress": {"address": "anna.lp@lpfund.com"}}],
+    "ccRecipients": [],
+    "bccRecipients": [],
+    "sentDateTime": "2026-07-20T10:30:00Z",
+    "receivedDateTime": "2026-07-20T10:30:00Z",
+    "webLink": "https://outlook.office365.com/owa/?ItemID=msg-002"
+  },
+  {
+    "id": "msg-003",
+    "internetMessageId": "<internal-fyi@exigentcap.com>",
+    "conversationId": "conv-B",
+    "subject": "FYI internal only",
+    "bodyPreview": "internal chatter",
+    "from": {"emailAddress": {"address": "edavis@exigentcap.com"}},
+    "toRecipients": [{"emailAddress": {"address": "ir@exigentcap.com"}}],
+    "ccRecipients": [],
+    "bccRecipients": [],
+    "sentDateTime": "2026-07-20T11:00:00Z",
+    "receivedDateTime": "2026-07-20T11:00:00Z",
+    "webLink": "https://outlook.office365.com/owa/?ItemID=msg-003"
+  },
+  {
+    "id": "msg-004",
+    "internetMessageId": "<autoreply@lpfund.com>",
+    "conversationId": "conv-C",
+    "subject": "Automatic reply: Question on Q2 capital account statement",
+    "bodyPreview": "I am out of the office.",
+    "from": {"emailAddress": {"address": "anna.lp@lpfund.com"}},
+    "toRecipients": [{"emailAddress": {"address": "ir@exigentcap.com"}}],
+    "ccRecipients": [],
+    "bccRecipients": [],
+    "sentDateTime": "2026-07-20T12:00:00Z",
+    "receivedDateTime": "2026-07-20T12:00:00Z",
+    "webLink": "https://outlook.office365.com/owa/?ItemID=msg-004"
+  },
+  {
+    "id": "msg-005",
+    "internetMessageId": "<newsletter@massmail.example>",
+    "conversationId": "conv-D",
+    "subject": "Weekly market newsletter — unsubscribe anytime",
+    "bodyPreview": "This week in markets... unsubscribe",
+    "from": {"emailAddress": {"address": "news@massmail.example"}},
+    "toRecipients": [{"emailAddress": {"address": "ir@exigentcap.com"}}],
+    "ccRecipients": [],
+    "bccRecipients": [],
+    "sentDateTime": "2026-07-20T13:00:00Z",
+    "receivedDateTime": "2026-07-20T13:00:00Z",
+    "webLink": "https://outlook.office365.com/owa/?ItemID=msg-005"
+  }
+]

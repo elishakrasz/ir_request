@@ -1,4 +1,8 @@
-# Phase 1 (schema provisioning)
+# Phase 1 (schema provisioning) + Phase 2 (ingestion)
 requests>=2.31
 
-# Phase 2+ (ingestion / dashboard) — added when those phases land
+# Tests
+pytest>=8
+
+# Azure Functions deployment only (not needed locally):
+# azure-functions

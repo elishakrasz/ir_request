@@ -1,0 +1,74 @@
+from datetime import datetime, timezone
+
+from ingestion.matching import (looks_autoreply, match_contacts, resolve_opportunity)
+
+T = datetime(2026, 7, 20, tzinfo=timezone.utc)
+ORG = ["exigentcap.com"]
+OPP_META = {
+    "opp-1": {"name": "Fund II", "oppcode": "OPP-0042", "aliases": ["Fund II"],
+              "active": True, "startdate": datetime(2026, 6, 1, tzinfo=timezone.utc)},
+    "opp-2": {"name": "Fund III", "oppcode": "OPP-0043", "aliases": ["Fund III"],
+              "active": True, "startdate": None},
+}
+
+
+def test_explicit_oppcode_wins():
+    oid, method, conf, status = resolve_opportunity(
+        T, "RE: OPP-0042 docs", "", {"opp-1", "opp-2"}, OPP_META, conv_opp="opp-2")
+    assert (oid, method, status) == ("opp-1", "Explicit", "Confirmed") and conf >= 95
+
+
+def test_thread_inheritance():
+    oid, method, conf, status = resolve_opportunity(
+        T, "RE: hello", "", {"opp-1", "opp-2"}, OPP_META, conv_opp="opp-2")
+    assert (oid, method, conf, status) == ("opp-2", "Thread", 90, "Confirmed")
+
+
+def test_single_active_contact_match():
+    oid, method, conf, status = resolve_opportunity(
+        T, "hello", "", {"opp-1"}, OPP_META, conv_opp=None)
+    assert (oid, method, conf, status) == ("opp-1", "ContactMatch", 75, "Confirmed")
+
+
+def test_contact_match_respects_monitoring_start():
+    before = datetime(2026, 5, 1, tzinfo=timezone.utc)  # predates opp-1 start
+    oid, method, conf, status = resolve_opportunity(
+        before, "hello", "", {"opp-1"}, OPP_META, conv_opp=None)
+    assert status in ("Suggested", "Unmatched") and method is None
+
+
+def test_content_alias_narrows_to_suggested():
+    oid, method, conf, status = resolve_opportunity(
+        T, "About Fund III reporting", "", {"opp-1", "opp-2"}, OPP_META, conv_opp=None)
+    assert (oid, method, conf, status) == ("opp-2", "Content", 60, "Suggested")
+
+
+def test_ambiguous_never_silently_assigned():
+    oid, method, conf, status = resolve_opportunity(
+        T, "hello", "", {"opp-1", "opp-2"}, OPP_META, conv_opp=None)
+    assert status == "Suggested" and method is None and conf < 60
+
+
+def test_no_candidates_unmatched():
+    oid, method, conf, status = resolve_opportunity(
+        T, "hello", "", set(), {}, conv_opp=None)
+    assert (oid, status) == (None, "Unmatched")
+
+
+def test_contact_email_match_case_insensitive_and_plus_unmatched():
+    email_map = {"anna.lp@lpfund.com": ("c1", {"opp-1"})}
+    hit = match_contacts(["Anna.LP@LPFund.com".lower()], email_map, ORG)
+    assert "c1" in hit
+    miss = match_contacts(["anna.lp+tag@lpfund.com"], email_map, ORG)
+    assert miss == {}   # plus-addressing deliberately unmatched
+
+
+def test_internal_participants_never_match():
+    email_map = {"ir@exigentcap.com": ("cX", {"opp-1"})}   # misconfigured contact
+    assert match_contacts(["ir@exigentcap.com"], email_map, ORG) == {}
+
+
+def test_autoreply_subject_and_sender(cfg):
+    assert looks_autoreply("Automatic reply: hi", "anna@lpfund.com", cfg.rules)
+    assert looks_autoreply("hi", "no-reply@bank.com", cfg.rules)
+    assert not looks_autoreply("Quarterly question", "anna@lpfund.com", cfg.rules)
