@@ -19,6 +19,14 @@ fill in the remaining values at the bottom and Phase 1 (DEV schema) can start.
 > restricts — only legacy `ApplicationAccessPolicy` restricts an Entra grant). With App RBAC,
 > mail access comes *solely* from the scoped Exchange role assignment. Grant `Mail.Read` in Entra
 > **only** if using the legacy AAP fallback (2b).
+>
+> **OPERATOR DECISION (2026-07-28): tenant-wide `Mail.Read` is ACCEPTED and stays.** The shared
+> app registration needs `Mail.Read` for other workloads, so the Entra grant is kept and the app
+> can technically read any mailbox. Mailbox scope for THIS system is enforced by configuration
+> only: the explicit `MAILBOXES` allowlist in `.env` — the ingestion code never auto-enumerates
+> users. The Exchange RBAC assignment from 2a is redundant but harmless; AAP is not an option
+> because it would restrict the app id for the other workloads too. `verify_scope.py` reports the
+> out-of-scope probe as informational rather than a failure.
 
 - [ ] **App RBAC path (2a):** ensure the app has **no** `Mail.Read` application permission in
       Entra (API permissions blade — remove it if present; removal drops its admin consent too).

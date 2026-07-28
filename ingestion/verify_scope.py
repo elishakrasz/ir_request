@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Verify Graph Mail.Read consent + Exchange RBAC mailbox scoping (read-only).
+"""Verify Graph Mail.Read access for every configured mailbox (read-only).
 
 Positive: every mailbox in MAILBOXES must be readable (Inbox folder GET).
-Negative: a probe mailbox NOT in scope must be denied (expects 403/404).
+Out-of-scope probe: informational only — the operator ACCEPTED tenant-wide
+Mail.Read on the shared app (2026-07-28; other workloads need it). Mailbox
+scope for this system is enforced solely by the MAILBOXES allowlist.
 
 Usage: python -m ingestion.verify_scope [--negative someone@domain]
 """
@@ -47,12 +49,13 @@ def main():
         print(f"  {mark} {mb}: {code}"
               + (f" (Inbox items: {detail})" if code == 200 else f" ({detail})"))
 
-    print(f"— out-of-scope probe {args.negative} (expect 403 ErrorAccessDenied):")
+    print(f"— out-of-scope probe {args.negative} (informational):")
     code, detail = probe(token, args.negative)
-    denied = code in (403, 404)
-    ok &= denied
-    print(f"  {'✓' if denied else '✗ NOT DENIED — RBAC scoping is not effective!'} "
-          f"{code} ({detail})")
+    if code == 200:
+        print("  ⚠ accessible — tenant-wide Mail.Read (operator-accepted 2026-07-28; "
+              "scope control is the MAILBOXES allowlist, not authorization)")
+    else:
+        print(f"  scoped: {code} ({detail})")
 
     sys.exit(0 if ok else 1)
 

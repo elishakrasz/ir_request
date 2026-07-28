@@ -24,7 +24,7 @@ Ask the operator for these values before Phase 1 (do not guess):
 | `{TENANT_ID}`, `{CLIENT_ID}` | App registration for Graph + Dataverse | **resolved — reusing the existing prospect-pipeline app** (see `.env`); operator adds `Mail.Read` per Phase 0 checklist |
 | `{ORG_DOMAINS}` | Internal email domains (for inbound/outbound classification) | suggested `exigentcap.com` — confirm |
 
-**App-reuse note (operator decision, 2026-07-28):** the existing Entra app used by `prospect_pipeline` (Dataverse + app-only Graph) is reused rather than creating a new registration. Consequence: one app holds PROD Dataverse rights *and* mailbox read — the Exchange Application RBAC scoping in Phase 0 is therefore the **load-bearing control** and must be verified before first sync. Rotating this app's secret affects the prospect pipeline too.
+**App-reuse note (operator decisions, 2026-07-28):** the existing Entra app used by `prospect_pipeline` (Dataverse + app-only Graph) is reused rather than creating a new registration, and **tenant-wide `Mail.Read` is accepted** (other workloads on the same app need it — Exchange RBAC scoping was set up but cannot restrict an Entra grant). Mailbox scope is therefore enforced by configuration only: the explicit `MAILBOXES` allowlist in `.env`; the code must never auto-enumerate users. Rotating this app's secret affects the prospect pipeline too.
 
 ---
 
