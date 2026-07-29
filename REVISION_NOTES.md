@@ -73,6 +73,21 @@ suggests some live flags may be incomplete in CRM. Reversible either way: noise
 rows keep their data + reason, and a reclassify re-run after live-flag fixes
 re-matches them automatically. Operator decides: apply as-is / fix flags first.
 
+## WS2 — findings + deviation
+
+**PROD data truth (2026-07-29): all 128 live opportunities belong to Exigent
+SynthBee Holdings LP, and every live opp has a BLANK
+`mint_opportunitypipelinetypes`.** Consequences:
+1. The spec's fund-selector condition (live AND pipeline type = "ECG Investor
+   for Fund SPV") selects **zero** funds. Deviation: selector/roster use
+   live-only, accepting blank pipeline type (`isLiveInvestorOpp` in view.jsx);
+   the type check re-engages automatically if CRM starts populating it.
+2. The dashboard's active book is currently SynthBee-only — HIPstr/HP/FUS1/xAI
+   investor correspondence sits in noise (low_confidence) until those opps are
+   flagged live through the normal business process (⚠️ live flips trigger the
+   Buzz delivery flow — never bulk-edit), after which `reclassify` re-runs
+   resurrect it automatically.
+
 ## Workstream status
 
 - [x] Phase 0 — this document
