@@ -81,8 +81,11 @@ class Config:
     def from_env(cls, env: dict | None = None):
         env = env or load_env()
         url = env["DATAVERSE_URL"].rstrip("/")
-        if "exigentcrmprod" in url.lower():
-            raise SystemExit("REFUSING: DATAVERSE_URL points at PROD (house rule 1).")
+        if "exigentcrmprod" in url.lower() and env.get("DATAVERSE_ALLOW_PROD") != "1":
+            raise SystemExit(
+                "REFUSING: DATAVERSE_URL points at PROD without DATAVERSE_ALLOW_PROD=1 "
+                "(house rule 1 — set the flag only on explicit operator commit; "
+                "schema still only ever arrives via manual solution import).")
         floor = env.get("INGEST_FLOOR", "2026-01-01")
         return cls(
             tenant_id=env["TENANT_ID"],

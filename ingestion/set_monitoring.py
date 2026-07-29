@@ -61,7 +61,7 @@ def main():
         if not (o.get(f"{p}aliases") or "").strip() and fname != "(no fund)":
             payload[f"{p}aliases"] = "\n".join(fund_aliases(fname))
         if payload:
-            todo.append((o["opportunityid"], o.get("name", ""), payload))
+            todo.append((o["opportunityid"], o.get("name") or "(unnamed)", payload))
             by_fund[fname][0] += 1
         else:
             skipped += 1
