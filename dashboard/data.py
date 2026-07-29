@@ -38,7 +38,8 @@ def fetch_signals(dv: DataverseClient, cfg: Config) -> pd.DataFrame:
         f"{p}engagementsignals?$select={p}name,{p}direction,{p}channel,"
         f"{p}timestamputc,{p}sender,{p}snippet,{p}conversationid,{p}rfistatus,"
         f"{p}matchstatus,{p}matchmethod,{p}matchconfidence,{p}responselatencymin,"
-        f"{p}ismeaningful,{p}sourcelink,{p}messagekeyhash")
+        f"{p}ismeaningful,{p}sourcelink,{p}messagekeyhash,"
+        f"_{p}contact_value,_{p}opportunity_value")
     if not rows:
         return pd.DataFrame()
     df = pd.DataFrame([{
@@ -70,7 +71,8 @@ def fetch_requests(dv: DataverseClient, cfg: Config) -> pd.DataFrame:
     p, ch = cfg.prefix, cfg.choices
     rows = dv.query(
         f"{p}inforequests?$select={p}name,{p}status,{p}category,{p}receiveddate,"
-        f"{p}duedate,{p}completeddate,{p}aigenerated,{p}humanconfirmed")
+        f"{p}duedate,{p}completeddate,{p}aigenerated,{p}humanconfirmed,"
+        f"_{p}contact_value,_{p}opportunity_value")
     if not rows:
         return pd.DataFrame()
     df = pd.DataFrame([{
