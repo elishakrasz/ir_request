@@ -81,6 +81,57 @@ def match_contacts(participants: list[str], email_map: dict, org_domains: list[s
     return matched
 
 
+def resolve_opportunity_v2(subject: str, snippet: str, contact_oppids: set,
+                           opp_meta: dict, conv_opp: str | None,
+                           regarding_opp: str | None = None):
+    """v2 matcher (WS1): candidate scope = LIVE opportunities (new_live=Yes);
+    deterministic boosters in strict order. Returns (oppid, method, confidence);
+    the caller maps confidence → disposition via config thresholds
+    (>=85 auto_confirmed, 50-84 needs_review, <50 noise:low_confidence).
+
+    Order (spec 1.2):
+      1. Dynamics Regarding ground truth        → 100 Regarding
+      2. Live-opp prospect code in text         → 100 Explicit
+      3. Thread inheritance (confirmed conv)    →  90 Thread
+      4. Contact holds exactly ONE live opp     →  90 ContactMatch
+      5. Alias narrows live candidates to one   →  60 Content
+      6. Top candidate recorded                 →  30 (needs/noise per threshold)
+    """
+    text = f"{subject} {snippet}".lower()
+
+    if regarding_opp:
+        return regarding_opp, "Regarding", 100
+
+    for oid, m in opp_meta.items():
+        if m.get("live") and text_hit(m.get("prospectcode") or "", text):
+            return oid, "Explicit", 100
+
+    if conv_opp:
+        return conv_opp, "Thread", 90
+
+    live = [oid for oid in contact_oppids if opp_meta.get(oid, {}).get("live")]
+    if len(live) == 1:
+        return live[0], "ContactMatch", 90
+
+    pool = live or [oid for oid in contact_oppids if oid in opp_meta]
+    hits = [oid for oid in pool
+            if any(text_hit(a, text) for a in opp_meta.get(oid, {}).get("aliases", []))]
+    if len(hits) == 1:
+        return hits[0], "Content", 60
+    if pool:
+        return pool[0], None, 30
+    return None, None, 0
+
+
+def disposition_for(confidence: int, cfg) -> str:
+    """Map a match confidence to the WS1 three-way disposition."""
+    if confidence >= cfg.auto_confirm_min:
+        return "auto_confirmed"
+    if confidence >= cfg.review_min:
+        return "needs_review"
+    return "noise"
+
+
 def resolve_opportunity(msg_time: datetime, subject: str, snippet: str,
                         contact_oppids: set, opp_meta: dict, conv_opp: str | None):
     """Hierarchical, confidence-scored (spec step 5). Returns

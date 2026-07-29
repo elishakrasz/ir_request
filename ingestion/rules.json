@@ -1,5 +1,16 @@
 {
-  "_comment": "Config-driven exclusion + auto-reply detection rules (spec Phase 2 step 5). Operator-editable; matching is case-insensitive.",
+  "_comment": "Config-driven exclusion + auto-reply + noise-gate rules. Operator-editable without deploy (v2 WS1: noise_domains is the newsletter/bulk-sender blocklist; matching is case-insensitive, matches sender domain suffix).",
+  "noise_domains": [
+    "wsj.com", "dowjones.com", "bloomberg.net", "bloomberg.com", "ft.com",
+    "economist.com", "reuters.com", "cnbc.com", "barrons.com", "morningbrew.com",
+    "substack.com", "substackcdn.com", "beehiiv.com", "mailchimp.com",
+    "mailchimpapp.net", "rsgsv.net", "mcsv.net", "sendgrid.net", "sendgrid.com",
+    "hubspotemail.net", "hubspot.com", "marketo.com", "mktomail.com",
+    "constantcontact.com", "campaign-archive.com", "cmail19.com", "cmail20.com",
+    "exacttarget.com", "salesforce.com", "pardot.com", "eventbrite.com",
+    "cvent.com", "splashthat.com", "axios.com", "politico.com", "pitchbook.com",
+    "crunchbase.com", "cbinsights.com"
+  ],
   "excluded_senders": ["no-reply@carta.com"],
   "excluded_domains": [],
   "excluded_keywords": ["unsubscribe", "privileged & confidential - legal"],

@@ -20,7 +20,7 @@ from pathlib import Path
 from .classify import classify
 from .config import Config, STATE_DIR
 from .latency import compute_latencies
-from . import matching
+from . import llm, matching, noise
 
 FOLDERS = ("inbox", "sentitems")
 
@@ -92,6 +92,8 @@ def build_scope(opp_rows, conn_rows, contact_rows, roles_by_id=None, allowed_rol
         opp_meta[o["opportunityid"]] = {
             "name": o.get("name") or "",
             "oppcode": o.get("new_oppcode") or "",
+            "prospectcode": (o.get("new_prospectcode") or "").strip(),
+            "live": bool(o.get("new_live")),   # v2 matcher scope (WS1)
             "aliases": aliases,
             "active": bool(o.get("new_activemonitoring")),
             "startdate": parse_ts(start) if start else None,
@@ -176,7 +178,7 @@ class SyncRun:
 
     # ── payload ──────────────────────────────────────────────────────────────
     def _payload(self, msg, cid, oppid, method, conf, status, direction,
-                 meaningful, snippet, mailbox, rfi):
+                 meaningful, snippet, mailbox, rfi, noise_reason=None):
         p, ch = self.cfg.prefix, self.cfg.choices
         key = msg.get("internetMessageId") or msg["id"]
         body = {
@@ -203,6 +205,8 @@ class SyncRun:
             body[f"{p}matchmethod"] = ch.matchmethod[method]
         if oppid:
             body[f"{p}opportunity@odata.bind"] = f"/opportunities({oppid})"
+        if noise_reason:
+            body[f"{p}noisereason"] = clip(noise_reason, 100)
         return body
 
     def _diff_for_update(self, existing, payload):
@@ -227,8 +231,9 @@ class SyncRun:
                 out[f"{p}opportunity@odata.bind"] = payload[f"{p}opportunity@odata.bind"]
         return out
 
-    # ── per-message handling ─────────────────────────────────────────────────
-    def _handle(self, msg, opp_meta, email_map, conv_map, enrich_cache):
+    # ── per-message handling (v2: noise gate → boosters → thresholds) ────────
+    def _handle(self, msg, opp_meta, email_map, conv_map, enrich_cache,
+                regarding_map=None, noise_verdicts=None):
         cfg, ch, p, c = self.cfg, self.cfg.choices, self.cfg.prefix, self.counts
         subject, preview = msg.get("subject") or "", msg.get("bodyPreview") or ""
 
@@ -245,32 +250,59 @@ class SyncRun:
                                                 cfg.org_domains)
         meaningful = not matching.looks_autoreply(subject, msg["_sender"], cfg.rules)
         conv = msg.get("conversationId") or ""
+        key = msg.get("internetMessageId") or msg["id"]
 
-        # Enrichment GET — matched messages only, apply mode only (spec step 6).
+        # Noise gate (WS1): heuristic verdict precomputed in run(); LLM verdicts
+        # for candidates arrive via noise_verdicts.
+        noise_reason = msg.get("_noise_reason")
+        if noise_reason is None and noise_verdicts and msg["id"] in noise_verdicts:
+            noise_reason = noise.llm_label_to_noise_reason(noise_verdicts[msg["id"]])
+
+        # Enrichment GET — matched, non-noise messages only, apply mode only.
         snippet, rfi = preview, classify(subject, preview)
-        if self.apply and meaningful:
+        if self.apply and meaningful and not noise_reason:
             if msg["id"] not in enrich_cache:
                 enrich_cache[msg["id"]] = self.graph.enrich(msg["_mailbox"], msg["id"])
             enr = enrich_cache[msg["id"]]
-            if matching.headers_autoreply(enr["headers"]):
+            hn = noise.header_noise(enr["headers"])   # List-Unsubscribe etc.
+            if hn:
+                noise_reason = hn
+            elif matching.headers_autoreply(enr["headers"]):
                 meaningful = False
             body = enr["body"] or preview
             snippet = body[:2000]
-            rfi = classify(subject, body[:4000])   # body transient, never persisted
+            if not noise_reason:
+                rfi = classify(subject, body[:4000])  # body transient, never persisted
 
         for cid, oppids in contacts.items():
-            oppid, method, conf, status = matching.resolve_opportunity(
-                msg["_ts"], subject, snippet, oppids, opp_meta, conv_map.get(conv))
+            if noise_reason:
+                oppid, method, conf, status = None, None, 0, "Excluded"
+            else:
+                oppid, method, conf = matching.resolve_opportunity_v2(
+                    subject, snippet, oppids, opp_meta, conv_map.get(conv),
+                    regarding_opp=(regarding_map or {}).get(key))
+                dispo = matching.disposition_for(conf, cfg)
+                if dispo == "auto_confirmed":
+                    status = "Confirmed"
+                elif dispo == "needs_review":
+                    status = "Suggested" if oppid else "Unmatched"
+                else:                       # < review_min → noise (spec 1.3)
+                    status, noise_reason = "Excluded", "low_confidence"
+                    oppid, method = (oppid, None)  # keep top candidate for audit
             c.setdefault("by_status", {}).setdefault(status, 0)
             c["by_status"][status] += 1
             c.setdefault("by_method", {}).setdefault(method or "none", 0)
             c["by_method"][method or "none"] += 1
+            if noise_reason:
+                c.setdefault("noise_by_reason", {}).setdefault(noise_reason, 0)
+                c["noise_by_reason"][noise_reason] += 1
             if oppid and opp_meta.get(oppid, {}).get("fund_name"):
                 fn = opp_meta[oppid]["fund_name"]
                 c.setdefault("by_fund", {}).setdefault(fn, 0)
                 c["by_fund"][fn] += 1
             payload = self._payload(msg, cid, oppid, method, conf, status, direction,
-                                    meaningful, snippet, msg["_mailbox"], rfi)
+                                    meaningful and not noise_reason, snippet,
+                                    msg["_mailbox"], rfi, noise_reason=noise_reason)
             existing = self.dv.get_signal(msg["_hash"], cid)
             desc = f"signal {msg['_hash'][:12]}…/{cid[:8]} [{direction}/{status}]"
             if existing is None:
@@ -278,7 +310,8 @@ class SyncRun:
                 c["creates"] += 1
                 if len(self.samples) < 5:
                     self.samples.append(payload)
-                if rfi.is_info_request and direction == "Inbound" and created:
+                if rfi.is_info_request and direction == "Inbound" and created \
+                        and not noise_reason:
                     self._create_rfi(created, msg, rfi, cid, oppid)
             else:
                 delta = self._diff_for_update(existing, payload)
@@ -290,7 +323,7 @@ class SyncRun:
                     c["unchanged"] += 1
             if status == "Confirmed" and oppid and conv:
                 conv_map[conv] = oppid    # thread inheritance within this run
-            if conv:
+            if conv and not noise_reason:
                 self.touched_convs.add(conv)
 
     def _create_rfi(self, signal_row, msg, rfi, cid, oppid):
@@ -318,8 +351,12 @@ class SyncRun:
     def _latency_and_answered_pass(self):
         p, ch = self.cfg.prefix, self.cfg.choices
         rev = ch.rev_direction
+        excluded_val = ch.matchstatus["Excluded"]
         for conv in sorted(self.touched_convs):
             rows = self.dv.conversation_signals(conv)
+            # noise / auto-reply rows never participate in reply pairing (WS1/WS3)
+            rows = [r for r in rows if r.get(f"{p}ismeaningful")
+                    and r.get(f"{p}matchstatus") != excluded_val]
             sigs = [{"id": r[f"{p}engagementsignalid"],
                      "direction": rev.get(r.get(f"{p}direction"), "Internal"),
                      "ts": parse_ts(r[f"{p}timestamputc"]),
@@ -404,13 +441,37 @@ class SyncRun:
         say(f"conv-map: querying {len(convs_needed)} relevant conversations")
         conv_map = self.dv.confirmed_conv_opps(
             convs_needed, cfg.choices.matchstatus["Confirmed"])
-        say(f"conv-map: {len(conv_map)} already confirmed; "
+
+        # WS1 booster 1: Dynamics Regarding ground truth (internetMessageId → opp)
+        regarding_map = self.dv.fetch_regarding_map(
+            cfg.ingest_floor.strftime("%Y-%m-%dT%H:%M:%SZ"))
+        say(f"regarding-map: {len(regarding_map)} emails carry an Opportunity "
+            f"Regarding; conv-map: {len(conv_map)} confirmed; "
             f"processing {len(messages)} messages")
+
+        # WS1 noise gate — heuristics inline, LLM batch for candidates
+        candidates = []
+        for m in messages:
+            if not m["_contacts"]:
+                continue
+            verdict, reason = noise.gate(
+                m["_sender"], m.get("subject") or "", m.get("bodyPreview") or "",
+                cfg.rules,
+                sender_is_matched_contact=m["_sender"] in email_map,
+                sender_is_internal=matching.domain_of(m["_sender"]) in cfg.org_domains)
+            m["_noise_reason"] = reason if verdict == "noise" else None
+            if verdict == "candidate":
+                candidates.append({"key": m["id"], "sender": m["_sender"],
+                                   "subject": m.get("subject") or "",
+                                   "snippet": m.get("bodyPreview") or ""})
+        noise_verdicts = llm.classify_noise(candidates, log=say) if candidates else {}
 
         enrich_cache = {}
         for i, m in enumerate(messages, 1):
             try:
-                self._handle(m, opp_meta, email_map, conv_map, enrich_cache)
+                self._handle(m, opp_meta, email_map, conv_map, enrich_cache,
+                             regarding_map=regarding_map,
+                             noise_verdicts=noise_verdicts)
             except Exception as e:   # one bad row must never kill a 2h run
                 c["errors"] = c.get("errors", 0) + 1
                 self.error_samples.append(f"{m.get('id', '?')}: {e}")

@@ -50,10 +50,33 @@ Working log for the v2 revision spec. Updated per workstream.
    flag the buzz pipeline already flips), NOT v1's `new_activemonitoring` (which we had set
    on all 2,141 opps). `new_activemonitoring` is retired from the match path.
 
+## WS1 — queue-backfill dry-run stats (PROD, 2026-07-29)
+
+6,139 signals reprocessed through the v2 pipeline (noise gate → boosters →
+thresholds). LLM triage: 800 heuristic-undecidable candidates classified by
+claude-haiku-4-5 in 20 batched calls (79k in / 12k out tokens ≈ $0.14; verdicts
+cached, so --apply re-uses them free).
+
+| Transition | Rows |
+|---|---|
+| needs_review → auto_confirmed | 2,447 |
+| auto_confirmed → auto_confirmed (untouched) | 2,412 |
+| needs_review → noise | 1,170 |
+| auto_confirmed → noise (newsletters that had been confirmed) | 66 |
+| needs_review → needs_review (**the queue after backfill: 44**) | 44 |
+
+**Open judgment call (blocking --apply):** 1,094 of the noise rows are
+`low_confidence` — real correspondence with contacts whose own opportunity is
+not `new_live=Yes` (top-candidate funds: HIPstr II 307, Trophy 179, CRB 126,
+SynthBee 109…). Samples include capital-call reminders (e.g. HP Fund I-B), which
+suggests some live flags may be incomplete in CRM. Reversible either way: noise
+rows keep their data + reason, and a reclassify re-run after live-flag fixes
+re-matches them automatically. Operator decides: apply as-is / fix flags first.
+
 ## Workstream status
 
 - [x] Phase 0 — this document
-- [ ] WS1 noise gate + boosters + backfill
+- [x] WS1 code (noise gate, boosters, thresholds, backfill tool, 14 new tests) — backfill --apply pending operator gate
 - [ ] WS2 active-fund filter + roster
 - [ ] WS3 response pairing
 - [ ] WS4 health states

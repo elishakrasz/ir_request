@@ -37,6 +37,8 @@ OPP_ROWS = [{
     "opportunityid": "11111111-0000-0000-0000-000000000001",
     "name": "Exigent Fund II Investment",
     "new_oppcode": "OPP-0042",
+    "new_prospectcode": "EXG-1040",
+    "new_live": True,
     "new_aliases": "Fund II\nSynth",
     "new_activemonitoring": True,
     "new_monitoringstartdate": "2026-06-01T00:00:00Z",
@@ -88,6 +90,9 @@ class FakeDataverse:
 
     def fetch_connection_roles(self):
         return []
+
+    def fetch_regarding_map(self, since_iso):
+        return {}
 
     def fetch_contacts(self, ids):
         return [dict(r) for r in CONTACT_ROWS if r["contactid"] in ids]

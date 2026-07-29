@@ -23,6 +23,7 @@ def load_env(path: Path = REPO / ".env") -> dict:
 
 @dataclass
 class Rules:
+    noise_domains: list = field(default_factory=list)
     excluded_senders: list = field(default_factory=list)
     excluded_domains: list = field(default_factory=list)
     excluded_keywords: list = field(default_factory=list)
@@ -48,7 +49,8 @@ class Choices:
         self.rfistatus = {"NA": base, "Open": base + 1, "Answered": base + 2,
                           "Overdue": base + 3}  # Overdue reserved — never written
         self.matchmethod = {"Explicit": base, "Thread": base + 1, "ContactMatch": base + 2,
-                            "Content": base + 3, "Manual": base + 4}
+                            "Content": base + 3, "Manual": base + 4,
+                            "Regarding": base + 5}  # appended in v2 (append-only!)
         self.matchstatus = {"Confirmed": base, "Suggested": base + 1,
                             "Unmatched": base + 2, "Excluded": base + 3}
         self.req_status = {"New": base, "InProgress": base + 1, "WaitingInternal": base + 2,
@@ -76,6 +78,10 @@ class Config:
     rfi_due_bdays: int
     rfi_reply_status: str
     rules: Rules
+    # v2 WS1 disposition thresholds (spec 1.3): >=auto_confirm_min → Confirmed;
+    # review_min..auto_confirm_min-1 → needs_review; <review_min → noise
+    auto_confirm_min: int = 85
+    review_min: int = 50
 
     @classmethod
     def from_env(cls, env: dict | None = None):
@@ -98,6 +104,8 @@ class Config:
             choices=Choices(int(env.get("CHOICE_VALUE_BASE", "100000000"))),
             ingest_floor=datetime.fromisoformat(floor).replace(tzinfo=timezone.utc),
             fund_lookup=env.get("FUND_LOOKUP", "mint_fundorspv"),
+            auto_confirm_min=int(env.get("AUTO_CONFIRM_MIN", "85")),
+            review_min=int(env.get("REVIEW_MIN", "50")),
             rfi_due_bdays=int(env.get("RFI_DUE_BDAYS", "2")),
             rfi_reply_status=env.get("RFI_REPLY_STATUS", "WaitingExternal"),
             rules=Rules.load(Path(env.get("RULES_PATH", Path(__file__).parent / "rules.json"))),

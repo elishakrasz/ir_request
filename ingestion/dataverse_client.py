@@ -71,10 +71,24 @@ class DataverseClient:
     def fetch_opportunities(self, fund_lookup: str = "mint_fundorspv") -> list[dict]:
         p = self.p
         return self.query(
-            "opportunities?$select=opportunityid,name,"
+            "opportunities?$select=opportunityid,name,new_live,new_prospectcode,"
             f"{p}oppcode,{p}aliases,{p}activemonitoring,{p}monitoringstartdate,"
             f"_parentcontactid_value,_customerid_value,_{fund_lookup}_value"
             "&$filter=statecode eq 0")
+
+    def fetch_regarding_map(self, since_iso: str) -> dict:
+        """WS1 booster 1: {internetMessageId → opportunityid} from email
+        activities whose Regarding is an Opportunity (server-side sync /
+        Dynamics App for Outlook ground truth)."""
+        rows = self.query(
+            "emails?$select=messageid,_regardingobjectid_value"
+            f"&$filter=createdon ge {since_iso} and _regardingobjectid_value ne null")
+        out = {}
+        for r in rows:
+            if r.get("_regardingobjectid_value@Microsoft.Dynamics.CRM.lookuplogicalname") \
+                    == "opportunity" and r.get("messageid"):
+                out[r["messageid"]] = r["_regardingobjectid_value"]
+        return out
 
     def fetch_connections(self) -> list[dict]:
         # contact objecttypecode 2, opportunity 3; live connections only
@@ -125,7 +139,8 @@ class DataverseClient:
         p = self.p
         return self.query(
             f"{p}engagementsignals?$select={p}direction,{p}timestamputc,"
-            f"{p}responselatencymin,{p}rfistatus,{p}engagementsignalid"
+            f"{p}responselatencymin,{p}rfistatus,{p}engagementsignalid,"
+            f"{p}ismeaningful,{p}matchstatus"
             f"&$filter={p}conversationid eq '{conv_id}'")
 
     def requests_for_signals(self, signal_ids: list[str], open_values: list[int]) -> list[dict]:
