@@ -76,7 +76,11 @@ re-matches them automatically. Operator decides: apply as-is / fix flags first.
 ## Workstream status
 
 - [x] Phase 0 — this document
-- [x] WS1 code (noise gate, boosters, thresholds, backfill tool, 14 new tests) — backfill --apply pending operator gate
+- [x] WS1 **complete** — backfill applied 2026-07-29 (operator chose "apply as-is"
+  for the 1,094 low-confidence rows): PROD now Confirmed 4,868 / **queue 44** /
+  Excluded 1,227 (low_confidence 1,094 + llm 133). Queue verified newsletter-free;
+  remaining items are genuine multi-live-fund ambiguity. Noise excluded from
+  dashboard timeline/counts.
 - [ ] WS2 active-fund filter + roster
 - [ ] WS3 response pairing
 - [ ] WS4 health states
