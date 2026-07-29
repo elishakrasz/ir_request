@@ -730,6 +730,11 @@
                   <label description="Manual" languagecode="1033" />
                 </labels>
               </option>
+              <option value="100000005" IsHidden="0">
+                <labels>
+                  <label description="Regarding" languagecode="1033" />
+                </labels>
+              </option>
             </options>
           </optionset>
           <displaynames>
@@ -958,6 +963,46 @@
           </displaynames>
           <Descriptions>
             <Description description="Subject, truncated to 200" languagecode="1033" />
+          </Descriptions>
+        </attribute>
+        <attribute PhysicalName="new_noisereason">
+          <Type>nvarchar</Type>
+          <Name>new_noisereason</Name>
+          <LogicalName>new_noisereason</LogicalName>
+          <RequiredLevel>none</RequiredLevel>
+          <DisplayMask>ValidForAdvancedFind|ValidForForm|ValidForGrid</DisplayMask>
+          <ImeMode>auto</ImeMode>
+          <ValidForUpdateApi>1</ValidForUpdateApi>
+          <ValidForReadApi>1</ValidForReadApi>
+          <ValidForCreateApi>1</ValidForCreateApi>
+          <IsCustomField>1</IsCustomField>
+          <IsAuditEnabled>1</IsAuditEnabled>
+          <IsSecured>0</IsSecured>
+          <IntroducedVersion>1.0.0.1</IntroducedVersion>
+          <IsCustomizable>1</IsCustomizable>
+          <IsRenameable>1</IsRenameable>
+          <CanModifySearchSettings>1</CanModifySearchSettings>
+          <CanModifyRequirementLevelSettings>1</CanModifyRequirementLevelSettings>
+          <CanModifyAdditionalSettings>1</CanModifyAdditionalSettings>
+          <SourceType>0</SourceType>
+          <IsGlobalFilterEnabled>0</IsGlobalFilterEnabled>
+          <IsSortableEnabled>0</IsSortableEnabled>
+          <CanModifyGlobalFilterSettings>1</CanModifyGlobalFilterSettings>
+          <CanModifyIsSortableSettings>1</CanModifyIsSortableSettings>
+          <IsDataSourceSecret>0</IsDataSourceSecret>
+          <AutoNumberFormat></AutoNumberFormat>
+          <IsSearchable>0</IsSearchable>
+          <IsFilterable>0</IsFilterable>
+          <IsRetrievable>0</IsRetrievable>
+          <IsLocalizable>0</IsLocalizable>
+          <Format>text</Format>
+          <MaxLength>100</MaxLength>
+          <Length>200</Length>
+          <displaynames>
+            <displayname description="Noise Reason" languagecode="1033" />
+          </displaynames>
+          <Descriptions>
+            <Description description="Why the noise gate excluded this signal (v2 WS1); empty = not noise" languagecode="1033" />
           </Descriptions>
         </attribute>
         <attribute PhysicalName="new_opportunity">

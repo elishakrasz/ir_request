@@ -298,6 +298,25 @@ def ensure_key(api, entity_logical, key_schema, display, attrs):
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
+def ensure_option(api, entity_logical, attr_logical, label_text, value):
+    """Append an option to a local option set (append-only — never reorder)."""
+    r = api._req("GET", f"EntityDefinitions(LogicalName='{entity_logical}')"
+                        f"/Attributes(LogicalName='{attr_logical}')"
+                        "/Microsoft.Dynamics.CRM.PicklistAttributeMetadata"
+                        "?$expand=OptionSet($select=Options)")
+    r.raise_for_status()
+    existing = {o["Value"] for o in r.json()["OptionSet"]["Options"]}
+    if value in existing:
+        print(f"  exists: option {attr_logical}={label_text}")
+        return
+    api.create("InsertOptionValue", {
+        "EntityLogicalName": entity_logical,
+        "AttributeLogicalName": attr_logical,
+        "Value": value,
+        "Label": label(label_text),
+    }, f"option {entity_logical}.{attr_logical} += {label_text}({value})")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--apply", action="store_true",
@@ -305,6 +324,9 @@ def main():
     args = ap.parse_args()
 
     env = load_env(ENV_PATH)
+    import os
+    if os.environ.get("PROVISION_URL"):   # point at DEV while .env holds PROD
+        env["DATAVERSE_URL"] = os.environ["PROVISION_URL"]
     url = env.get("DATAVERSE_URL", "")
     if not url:
         sys.exit("DATAVERSE_URL is empty in .env")
@@ -456,6 +478,28 @@ def main():
                     desc="Reserved for Phase 5"),
     ]:
         ensure_attribute(api, "opportunity", a)
+
+    # 9. v2 revision columns (WS1 noise gate, WS5 summaries, WS6 urgency)
+    print("— v2 columns")
+    ensure_attribute(api, sig, string_attr(
+        f"{p}noisereason", "Noise Reason", 100,
+        desc="Why the noise gate excluded this signal (v2 WS1); empty = not noise"))
+    for a in [
+        memo_attr(f"{p}aisummary", "AI Summary", 4000,
+                  desc="Cached correspondence summary (v2 WS5)"),
+        datetime_attr(f"{p}aisummaryat", "AI Summary Generated"),
+        string_attr(f"{p}aisummarywatermark", "AI Summary Watermark", 100,
+                    desc="Newest signal timestamp included in the cached summary"),
+    ]:
+        ensure_attribute(api, "contact", a)
+    for a in [
+        picklist_attr(f"{p}statedurgency", "Stated Urgency",
+                      ["None", "UrgentLanguage", "ExplicitDeadline"], value_base,
+                      desc="Set once by the classifier at creation; never re-graded"),
+        datetime_attr(f"{p}explicitdeadline", "Explicit Deadline"),
+    ]:
+        ensure_attribute(api, req, a)
+    ensure_option(api, sig, f"{p}matchmethod", "Regarding", value_base + 5)
 
     n = len(api.creates)
     if args.apply:
