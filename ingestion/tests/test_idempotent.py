@@ -33,10 +33,15 @@ def test_first_run_creates_expected_rows(cfg, messages, tmp_path):
 
 
 def test_latency_written_on_thread(cfg, messages, tmp_path):
+    # WS3: latency is inbound-anchored (business minutes until OUR reply)
     dv, _, _ = run_once(cfg, tmp_path, messages=messages)
+    inb = [r for r in dv.signals.values()
+           if r["new_direction"] == cfg.choices.direction["Inbound"]
+           and r["new_responselatencymin"] is not None]
+    assert inb and inb[0]["new_responselatencymin"] == 90   # 09:00 → 10:30 Mon
     out = [r for r in dv.signals.values()
            if r["new_direction"] == cfg.choices.direction["Outbound"]]
-    assert out and out[0]["new_responselatencymin"] == 90   # 09:00 → 10:30
+    assert all(r["new_responselatencymin"] is None for r in out)
 
 
 def test_second_run_is_zero_writes(cfg, messages, tmp_path):

@@ -19,7 +19,7 @@ from pathlib import Path
 
 from .classify import classify
 from .config import Config, STATE_DIR
-from .latency import compute_latencies
+from .latency import compute_response_pairs
 from . import llm, matching, noise
 
 FOLDERS = ("inbox", "sentitems")
@@ -358,12 +358,15 @@ class SyncRun:
             rows = [r for r in rows if r.get(f"{p}ismeaningful")
                     and r.get(f"{p}matchstatus") != excluded_val]
             sigs = [{"id": r[f"{p}engagementsignalid"],
+                     "contact": r.get(f"_{p}contact_value"),
                      "direction": rev.get(r.get(f"{p}direction"), "Internal"),
                      "ts": parse_ts(r[f"{p}timestamputc"]),
                      "latency": r.get(f"{p}responselatencymin"),
+                     "meaningful": True,   # rows pre-filtered above
                      "rfistatus": r.get(f"{p}rfistatus")} for r in rows
                     if r.get(f"{p}timestamputc")]
-            for sid, minutes in compute_latencies(sigs).items():
+            # WS3: inbound-anchored pairing, business-minute latency
+            for sid, minutes in compute_response_pairs(sigs).items():
                 self.dv.patch(f"{p}engagementsignals", sid,
                               {f"{p}responselatencymin": minutes}, f"latency {sid[:8]}")
                 self.counts["latency_patched"] += 1

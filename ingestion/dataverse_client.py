@@ -140,7 +140,7 @@ class DataverseClient:
         return self.query(
             f"{p}engagementsignals?$select={p}direction,{p}timestamputc,"
             f"{p}responselatencymin,{p}rfistatus,{p}engagementsignalid,"
-            f"{p}ismeaningful,{p}matchstatus"
+            f"{p}ismeaningful,{p}matchstatus,_{p}contact_value"
             f"&$filter={p}conversationid eq '{conv_id}'")
 
     def requests_for_signals(self, signal_ids: list[str], open_values: list[int]) -> list[dict]:
