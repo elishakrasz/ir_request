@@ -45,12 +45,17 @@ def money(v):
     return float(m) if m else 0.0
 
 
-def stage_of(r):
+def stage_of(r, two_way_emails=frozenset()):
+    """Stage from tracker flags, upgraded by ENGAGEMENT EVIDENCE: a prospect
+    with real two-way correspondence (from the engagement-signal table) counts
+    as Outreach even when the Planner teamsMeeting flag was never ticked —
+    fixes the Outreach=0 artifact without demanding Planner discipline."""
     if r.get("status") == "CounterSigned" or yn(r.get("subdocsCompleted")):
         return "Completed"
     if yn(r.get("subdocsSent")) or r.get("status") in ("Invited", "InProgress"):
         return "SubDocs"
-    if yn(r.get("teamsMeeting")) or yn(r.get("transcript")):
+    if yn(r.get("teamsMeeting")) or yn(r.get("transcript")) \
+            or (r.get("email") or "").lower() in two_way_emails:
         return "Outreach"
     if any(yn(r.get(k)) for k in ("sendNda", "nda", "ndaSigned", "ndaApproved",
                                   "sentDocusign")):
@@ -129,6 +134,16 @@ def main():
     we_owe.sort(key=lambda e: -e["ageDays"])
     waiting_on.sort(key=lambda e: -e["ageDays"])
 
+    # engagement evidence for the Outreach stage (both directions observed)
+    two_way_emails = set()
+    for cid, rows in by_contact.items():
+        dirs = {r.get(f"{p}direction") for r in rows}
+        if inb in dirs and outb in dirs:
+            for f in ("emailaddress1", "emailaddress2", "emailaddress3"):
+                e = ((cmeta.get(cid) or {}).get(f) or "").strip().lower()
+                if e:
+                    two_way_emails.add(e)
+
     # ── prospects (Step 3 flags — all real from the tracker join) ────────────
     prospects = []
     for r in tracker_rows:
@@ -138,7 +153,7 @@ def main():
             "name": r.get("name") or "?",
             "opportunity": opp.get("name") or code or "—",
             "owner": (opp.get(f"_ownerid_value{FMT}") or "—"),
-            "stage": stage_of(r),
+            "stage": stage_of(r, two_way_emails),
             "hasPlannerTask": r.get("badge") != "not in planner",
             "hasDynamicsOpp": bool(opp) or yn(r.get("trackedDynamics")),
             "folderExists": yn(r.get("ddm")) or yn(r.get("buzzMaterials")),
@@ -208,6 +223,23 @@ def main():
         "exclusions": {"note": "handled upstream by the engagement noise gate "
                                "(ingestion/rules.json noise_domains)"},
     }
+
+    # Estimated-Revenue gap worklist (finding 2): opps the team should price.
+    # Fill the amount column and feed it to ingestion/set_estimates.py.
+    import csv as _csv
+    gaps = OUT.parent / "estimated_revenue_gaps.csv"
+    with gaps.open("w", newline="") as f:
+        w = _csv.writer(f)
+        w.writerow(["code", "prospect", "opportunity", "owner",
+                    "estimated_usd_FILL_ME"])
+        for pr in prospects:
+            if not pr["estimatedUsd"] and not pr["committedUsd"] \
+                    and pr["opportunity"] != "—":
+                w.writerow([next((c for c, o in by_code.items()
+                                  if (o.get("name") or "") == pr["opportunity"]),
+                                 ""),
+                            pr["name"], pr["opportunity"], pr["owner"], ""])
+    say(f"wrote {gaps} (Estimated Revenue worklist)")
 
     OUT.parent.mkdir(exist_ok=True)
     OUT.write_text(
