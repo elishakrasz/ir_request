@@ -175,11 +175,18 @@ def main():
         })
 
     # ── funnel + commitments ─────────────────────────────────────────────────
-    counts = defaultdict(int)
+    # Funnel = PROGRESSION (brief's sample is monotonic): count of prospects
+    # whose furthest stage is AT OR BEYOND each step, so conversions are
+    # stage-to-stage survival rates. atStage kept for the register filter.
+    stage_idx = {s: i for i, (s, _) in enumerate(STAGES)}
+    at_stage = defaultdict(int)
     for pr in prospects:
-        counts[pr["stage"]] += 1
-    funnel = [{"stage": s, "count": counts[s], "plannerBucket": b}
-              for s, b in STAGES]
+        at_stage[pr["stage"]] += 1
+    funnel = []
+    for i, (s, b) in enumerate(STAGES):
+        reached = sum(n for st, n in at_stage.items() if stage_idx[st] >= i)
+        funnel.append({"stage": s, "count": reached, "atStage": at_stage[s],
+                       "plannerBucket": b})
 
     tiers = defaultdict(float)
     by_stage = defaultdict(lambda: defaultdict(float))
