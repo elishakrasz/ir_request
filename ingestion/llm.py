@@ -67,6 +67,77 @@ NOISE_SCHEMA = {
 }
 
 
+REQUEST_SYSTEM = (
+    "You screen inbound investor emails for a private-equity IR team, "
+    "detecting information requests that require a response or action.\n"
+    "An information request = the sender asks the firm for something: a "
+    "document, a figure, a signature, a meeting, access, a status update, an "
+    "answer to a question. Mere pleasantries, FYIs, and confirmations are not "
+    "requests.\n"
+    "If it IS a request, also extract:\n"
+    "- description: ONE sentence stating what they want (concrete, no filler)\n"
+    "- category: one of Reporting, CapitalAccount, Valuation, KYC-AML, "
+    "SubscriptionDocs, Legal-SideLetter, Meeting, DataRoom, Other\n"
+    "- urgency (STATED urgency only — never inferred): 'explicit_deadline' if "
+    "a date/time by which they need it is stated (also return the date as "
+    "ISO YYYY-MM-DD), 'urgent_language' if words like urgent/ASAP/immediately "
+    "appear, else 'none'."
+)
+
+REQUEST_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "is_request": {"type": "boolean"},
+        "description": {"type": "string"},
+        "category": {"type": "string", "enum": [
+            "Reporting", "CapitalAccount", "Valuation", "KYC-AML",
+            "SubscriptionDocs", "Legal-SideLetter", "Meeting", "DataRoom",
+            "Other"]},
+        "urgency": {"type": "string",
+                    "enum": ["none", "urgent_language", "explicit_deadline"]},
+        "deadline": {"type": ["string", "null"],
+                     "description": "ISO date if explicit_deadline else null"},
+    },
+    "required": ["is_request", "description", "category", "urgency", "deadline"],
+    "additionalProperties": False,
+}
+
+
+def classify_request(subject: str, body: str, log=print) -> dict | None:
+    """Single-message request detection (WS6). Cached by subject+body hash so a
+    re-synced message never re-invokes. Returns the schema dict, or None when
+    no key / refused (callers treat as not-a-request)."""
+    if not available():
+        return None
+    cache = _load_cache()
+    ck = "req:" + cache_key(subject, body[:500])
+    if ck in cache:
+        return cache[ck]
+    import anthropic
+    client = anthropic.Anthropic(api_key=_api_key(), max_retries=4)
+    try:
+        resp = client.messages.create(
+            model=REQUEST_MODEL,
+            max_tokens=512,
+            system=[{"type": "text", "text": REQUEST_SYSTEM,
+                     "cache_control": {"type": "ephemeral"}}],
+            messages=[{"role": "user",
+                       "content": f"Subject: {subject}\n\n{body[:4000]}"}],
+            output_config={"format": {"type": "json_schema",
+                                      "schema": REQUEST_SCHEMA}},
+        )
+    except anthropic.APIStatusError as e:
+        log(f"[llm] request classify failed ({type(e).__name__}) — treated as "
+            "not-a-request; retried on next sync of this thread")
+        return None
+    if resp.stop_reason == "refusal":
+        return None
+    data = json.loads(next(b.text for b in resp.content if b.type == "text"))
+    cache[ck] = data
+    _save_cache(cache)
+    return data
+
+
 def cache_key(sender: str, subject: str) -> str:
     return hashlib.sha256(f"{sender.lower()}|{subject.lower()}".encode()).hexdigest()[:32]
 

@@ -88,6 +88,57 @@ SynthBee Holdings LP, and every live opp has a BLANK
    Buzz delivery flow — never bulk-edit), after which `reclassify` re-runs
    resurrect it automatically.
 
+## WS3 — response pairing (complete)
+
+Rebuilt to spec semantics: pair = meaningful inbound → earliest subsequent
+meaningful outbound, same conversation + same contact; latency in **business
+minutes (Sun–Thu, Asia/Jerusalem)** stored on the INBOUND row. PROD migration
+(`repair_latency`): 1,115 inbound latencies written, 2,043 stale v1 values
+nulled — verified 1,125 inbound-anchored / 0 leftovers after the next sync
+tick. **Median response: 8.7 business hours** (the "—, 0 replies" card is
+fixed). Awaiting-reply = inbound with null latency older than 48 business
+hours → headline card + oldest-first list. 11 pairing/bizhours unit tests
+(cross-midnight, cross-weekend, multi-inbound, outbound-first, only-null).
+
+## WS4 — honest health states (complete)
+
+Four states with precedence overdue-red > gray "Never heard from" (no inbound
+ever) > red >21d > amber (8–21d or awaiting-reply breach) > green, each with a
+derived reason string; sorted red→amber→gray→green in the flat table and the
+roster. First render surfaced 558 never-heard-from cohort contacts that v1
+displayed as "Healthy".
+
+## WS5 — cached AI summaries (complete)
+
+`ingestion/summaries.py`: watermark-gated (no new confirmed signals → zero LLM
+calls, verified by design + logs), 30d confirmed-email input truncated
+oldest-first to 24k chars, claude-opus-5 with the spec's prompt contract and
+exact sentinel; per-run token logging; 529-resilient (skip → watermark retries
+next run). Nightly cron 03:00 (`run_summaries.sh`) + on-demand
+`--contact <id>`. Summaries render in the contact drill-down and inline on
+request-tracker rows. Required role addition (done): Write on Contact.
+
+## WS6 — requests: classifier + urgency + escalation (complete)
+
+Phase 3 enabled: `classify.py` → `llm.classify_request` (claude-opus-5,
+structured outputs, cached by subject+body hash, only on enriched confirmed
+inbound, never in dry runs). Creates `new_inforequest` with one-sentence
+description as title, category, `new_statedurgency` (set once, never
+re-graded) and `new_explicitdeadline` (parsed date; also drives duedate).
+Seeded-email acceptance: 3/3 correct (explicit_deadline→2026-08-05,
+urgent_language, none). Escalation is deterministic at render
+(`requests_logic.py` + JS mirror): amber >2 business days open, red >5 or past
+deadline; thresholds env-configurable. Answered-suggestion stays the existing
+outbound-reply flip (→ WaitingExternal), close remains human.
+
+## WS7 — headline cards (complete)
+
+Four cards mapped to the core questions — Overdue for touch (+ never-heard
+secondary), Awaiting reply, Open requests (red/amber breakdown), To triage —
+each click-scrolls to the list it counts, and counts derive from the same
+arrays the lists render (exact reconciliation). Volume + median response +
+active contacts moved to a caption under the filters.
+
 ## Workstream status
 
 - [x] Phase 0 — this document
@@ -96,9 +147,13 @@ SynthBee Holdings LP, and every live opp has a BLANK
   Excluded 1,227 (low_confidence 1,094 + llm 133). Queue verified newsletter-free;
   remaining items are genuine multi-live-fund ambiguity. Noise excluded from
   dashboard timeline/counts.
-- [ ] WS2 active-fund filter + roster
-- [ ] WS3 response pairing
-- [ ] WS4 health states
-- [ ] WS5 AI summaries
-- [ ] WS6 requests
-- [ ] WS7 headline cards
+- [x] WS2 active-fund filter + roster (see WS2 findings above)
+- [x] WS3 response pairing
+- [x] WS4 health states
+- [x] WS5 AI summaries
+- [x] WS6 requests
+- [x] WS7 headline cards
+
+Final test count: 55 passing (ingestion). All LLM features carry cost-control
+stories in code comments and honor them (heuristics-first, batching, caching,
+watermarks, dry-run-never-invokes).

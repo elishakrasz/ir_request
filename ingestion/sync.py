@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from .classify import classify
+from .classify import RfiResult, classify
 from .config import Config, STATE_DIR
 from .latency import compute_response_pairs
 from . import llm, matching, noise
@@ -259,7 +259,9 @@ class SyncRun:
             noise_reason = noise.llm_label_to_noise_reason(noise_verdicts[msg["id"]])
 
         # Enrichment GET — matched, non-noise messages only, apply mode only.
-        snippet, rfi = preview, classify(subject, preview)
+        # The (LLM) request classifier runs ONLY on the enriched body below —
+        # never on previews, never in dry runs (cost control, WS6).
+        snippet, rfi = preview, RfiResult()
         if self.apply and meaningful and not noise_reason:
             if msg["id"] not in enrich_cache:
                 enrich_cache[msg["id"]] = self.graph.enrich(msg["_mailbox"], msg["id"])
@@ -271,7 +273,8 @@ class SyncRun:
                 meaningful = False
             body = enr["body"] or preview
             snippet = body[:2000]
-            if not noise_reason:
+            if not noise_reason and direction == "Inbound":
+                # WS6: LLM request detection on confirmed-bound inbound only
                 rfi = classify(subject, body[:4000])  # body transient, never persisted
 
         for cid, oppids in contacts.items():
@@ -342,6 +345,8 @@ class SyncRun:
             f"{p}sourcesignal@odata.bind":
                 f"/{p}engagementsignals({signal_row[f'{p}engagementsignalid']})",
         }
+        if deadline_iso:
+            body[f"{p}explicitdeadline"] = deadline_iso
         if oppid:
             body[f"{p}opportunity@odata.bind"] = f"/opportunities({oppid})"
         self.dv.create(f"{p}inforequests", body, f"inforequest for {msg['_hash'][:12]}…")

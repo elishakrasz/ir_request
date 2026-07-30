@@ -1,4 +1,8 @@
 """Shared fakes + fixtures. No live calls anywhere (spec: fixture JSON only)."""
+import os
+
+os.environ["CLASSIFIER_BACKEND"] = "stub"   # never hit the LLM from unit tests
+
 import json
 from datetime import datetime, timezone
 from pathlib import Path

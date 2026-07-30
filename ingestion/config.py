@@ -59,6 +59,8 @@ class Choices:
         self.req_category = {n: base + i for i, n in enumerate(
             ["Reporting", "CapitalAccount", "Valuation", "KYC-AML", "SubscriptionDocs",
              "Legal-SideLetter", "Meeting", "DataRoom", "Other"])}
+        self.urgency = {"None": base, "UrgentLanguage": base + 1,
+                        "ExplicitDeadline": base + 2}   # v2 WS6 (new_statedurgency)
         self.rev_direction = {v: k for k, v in self.direction.items()}
         self.rev_matchmethod = {v: k for k, v in self.matchmethod.items()}
 
