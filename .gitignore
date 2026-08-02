@@ -21,3 +21,6 @@ venv/
 
 # Windows download metadata
 *Zone.Identifier
+
+# Data exports (PII) — never commit
+reports/
