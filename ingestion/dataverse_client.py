@@ -149,8 +149,8 @@ class DataverseClient:
             flt = " or ".join(f"_{p}sourcesignal_value eq {s}" for s in signal_ids[i:i + 20])
             status_flt = " or ".join(f"{p}status eq {v}" for v in open_values)
             rows.extend(self.query(
-                f"{p}inforequests?$select={p}inforequestid,{p}status"
-                f"&$filter=({flt}) and ({status_flt})"))
+                f"{p}inforequests?$select={p}inforequestid,{p}status,"
+                f"_{p}sourcesignal_value&$filter=({flt}) and ({status_flt})"))
         return rows
 
     # ── writes (dry-run aware) ───────────────────────────────────────────────

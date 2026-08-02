@@ -33,7 +33,7 @@ def signals_frame(dv: DataverseClient, p: str) -> pd.DataFrame:
         f"{p}timestamputc,{p}sender,{p}snippet,{p}conversationid,{p}rfistatus,"
         f"{p}matchstatus,{p}matchmethod,{p}matchconfidence,{p}noisereason,"
         f"{p}responselatencymin,{p}ismeaningful,{p}sourcelink,createdon,"
-        f"_{p}contact_value,_{p}opportunity_value")
+        f"{p}messagekeyhash,_{p}contact_value,_{p}opportunity_value")
     out = []
     for r in rows:
         lat = r.get(f"{p}responselatencymin")
@@ -55,6 +55,7 @@ def signals_frame(dv: DataverseClient, p: str) -> pd.DataFrame:
             "RFI status": lab(r, f"{p}rfistatus"),
             "Conversation id": r.get(f"{p}conversationid"),
             "Source link": r.get(f"{p}sourcelink"),
+            "Message key hash": r.get(f"{p}messagekeyhash") or "",
             "Contact id": r.get(f"_{p}contact_value"),
             "Opportunity id": r.get(f"_{p}opportunity_value"),
         })
@@ -66,7 +67,8 @@ def requests_frame(dv: DataverseClient, p: str) -> pd.DataFrame:
     rows = dv.query(
         f"{p}inforequests?$select={p}name,{p}status,{p}category,{p}receiveddate,"
         f"{p}duedate,{p}completeddate,{p}statedurgency,{p}explicitdeadline,"
-        f"{p}aigenerated,{p}humanconfirmed,_{p}contact_value,_{p}opportunity_value")
+        f"{p}aigenerated,{p}humanconfirmed,_{p}contact_value,"
+        f"_{p}opportunity_value,_{p}sourcesignal_value")
     out = [{
         "Received": r.get(f"{p}receiveddate"),
         "Title": r.get(f"{p}name"),
@@ -80,11 +82,12 @@ def requests_frame(dv: DataverseClient, p: str) -> pd.DataFrame:
         "Explicit deadline": r.get(f"{p}explicitdeadline"),
         "AI generated": bool(r.get(f"{p}aigenerated")),
         "Human confirmed": bool(r.get(f"{p}humanconfirmed")),
+        "Source signal id": r.get(f"_{p}sourcesignal_value"),
     } for r in rows]
     return pd.DataFrame(out, columns=[
         "Received", "Title", "Status", "Category", "Contact", "Opportunity",
         "Due", "Completed", "Stated urgency", "Explicit deadline",
-        "AI generated", "Human confirmed"])
+        "AI generated", "Human confirmed", "Source signal id"])
 
 
 def scope_frames(dv: DataverseClient, cfg: Config):
@@ -177,6 +180,22 @@ def enrich_contacts(contact_df: pd.DataFrame, sig_df: pd.DataFrame) -> pd.DataFr
     return out[cols]
 
 
+def write_blocks(xl, sheet: str, blocks):
+    """Write [(caption, df), …] stacked on one sheet with blank separators."""
+    row = 0
+    for caption, df in blocks:
+        pd.DataFrame({sheet: [caption]}).to_excel(
+            xl, sheet_name=sheet, index=False, header=False, startrow=row)
+        row += 1
+        if df is None or df.empty:
+            pd.DataFrame({" ": ["(none)"]}).to_excel(
+                xl, sheet_name=sheet, index=False, header=False, startrow=row)
+            row += 2
+            continue
+        df.to_excel(xl, sheet_name=sheet, index=False, startrow=row)
+        row += len(df) + 3
+
+
 def autofit(ws, max_width=60):
     for col in ws.columns:
         letter = col[0].column_letter
@@ -202,6 +221,23 @@ def main():
     trk_df = tracker_frame()
 
     now = datetime.now(timezone.utc)
+
+    # ── close-readiness analysis layer (directive 2026-08-02) ─────────────
+    from . import analysis
+    fund_of = dict(zip(opp_df["Opportunity id"], opp_df["Fund"]))
+    email_of = dict(zip(contact_df["Contact id"], contact_df["Email"]))
+    sig_df["Fund"] = sig_df["Opportunity id"].map(fund_of).fillna("(no fund)")
+    sig_df["Contact email"] = sig_df["Contact id"].map(email_of).fillna("")
+    sig_df = analysis.mark_primary(sig_df)                       # §0.1
+    print("computing views…", flush=True)
+    bic_work, bic_all = analysis.ball_in_court(sig_df, now)      # §1
+    req_open = analysis.open_requests(req_df, now)               # §2
+    clock = analysis.deal_clock(trk_df, bic_all, now)            # §3
+    stages, stuck = analysis.funnel(trk_df, bic_all, req_open
+                                    if isinstance(req_open, pd.DataFrame)
+                                    else pd.DataFrame())         # §4
+    lat_sum, lat_trend, lat_off = analysis.latency_tail(sig_df)  # §5
+    hyg = analysis.hygiene(sig_df, contact_df, link_df, opp_df, now)  # §6
     summary = pd.DataFrame([
         ("Generated (UTC)", now.strftime("%Y-%m-%d %H:%M")),
         ("Environment", cfg.dataverse_url),
@@ -222,6 +258,22 @@ def main():
     out = out_dir / f"engagement_export_{now.strftime('%Y%m%d_%H%M')}.xlsx"
     with pd.ExcelWriter(out, engine="openpyxl") as xl:
         summary.to_excel(xl, sheet_name="Summary", index=False)
+        # analysis views first — these are the triage worklists
+        bic_work.to_excel(xl, sheet_name="Ball In Court", index=False)
+        (req_open if isinstance(req_open, pd.DataFrame) else pd.DataFrame()) \
+            .to_excel(xl, sheet_name="Open Requests", index=False)
+        clock.to_excel(xl, sheet_name="Deal Clock", index=False)
+        write_blocks(xl, "Funnel", [
+            (f"Stage funnel (independent stages; "
+             f"{stages.attrs.get('inconsistencies', 0)} NDA/subdoc "
+             "inconsistencies in source)", stages),
+            ("Stuck cohort — SubDocs sent, not completed", stuck)])
+        write_blocks(xl, "Latency Tail", [
+            ("Distribution (mean deliberately omitted)", lat_sum),
+            ("Weekly exceedance trend", lat_trend),
+            ("Offending conversations (> 8 business hrs)", lat_off)])
+        hyg.to_excel(xl, sheet_name="Hygiene", index=False)
+        # raw data
         sig_df.to_excel(xl, sheet_name="Signals", index=False)
         contact_df.to_excel(xl, sheet_name="Contacts", index=False)
         opp_df.to_excel(xl, sheet_name="Opportunities", index=False)

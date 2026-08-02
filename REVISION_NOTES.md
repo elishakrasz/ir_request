@@ -157,3 +157,45 @@ active contacts moved to a caption under the filters.
 Final test count: 55 passing (ingestion). All LLM features carry cost-control
 stories in code comments and honor them (heuristics-first, batching, caching,
 watermarks, dry-run-never-invokes).
+
+---
+
+## Close-Readiness Analysis Layer (directive 2026-08-02)
+
+Adds the computed-views layer over the existing pipeline; every view lands as
+an export-workbook sheet (`ingestion/export_xlsx.py`) — no UI this phase.
+All thresholds in ONE config block: `analysis.THRESHOLDS`.
+
+### Prerequisite fixes (§0)
+- **§0.1 dedup** — `analysis.mark_primary()`: canonical identity =
+  `(opportunity, messagekeyhash)` (keyhash = sha256(internetMessageId), so it
+  is already mailbox-independent; the alternate key guarantees once-per-contact).
+  Primary = sender-matching contact first, then stable id order. Rollups (§5
+  latency tail, volume) consume primary rows only. **Deviation:** the flag is
+  computed at export time, NOT stored — a stored `new_isprimary` column +
+  `new_routingcategory` are added to provision.py §10 and will reach PROD with
+  the next manual solution import; until then the sidecar/computed forms are
+  authoritative.
+- **§0.2 promotion** — `ingestion/promote_requests.py` (idempotent on the
+  Source Signal lookup; dry-run default). Found & fixed en route:
+  `_create_rfi` referenced an undefined `deadline_iso` and never wrote
+  `statedurgency` (it had never successfully run — hence 0 request rows);
+  `add_business_days` was Mon–Fri while everything else is Sun–Thu (fixed,
+  pinned by test); the Answered flip now stamps `completeddate` (reply ts)
+  + status Completed instead of parking at WaitingExternal.
+
+### Views (§1–§6)
+`ingestion/analysis.py`; sheets: Ball In Court, Open Requests, Deal Clock,
+Funnel (+stuck cohort w/ per-prospect explanation), Latency Tail (median/p90/
+exceedances — mean deliberately banned), Hygiene (never_contacted, gone_quiet,
+delivery_failure, suggested_closed_lost).
+- 4-way routing taxonomy (§2.2) classified by one cached Opus call at
+  promotion (`llm.classify_promotion`); stored in
+  `state/request_routing.json` until the choice column exists (see above).
+- Deal clock (§3): close date = `THRESHOLDS.close_dates` fund map
+  (SynthBee 2026-08-15); tracker `statusSince` vs last meaningful signal.
+- Closed-lost (§6): keyword prescreen (`DECLINE_RE`) on each contact's LAST
+  inbound only, then cached `llm.classify_closed_lost` — LLM sees only
+  prescreened candidates (cost story).
+
+Test count: 55 → 63 (rfi lifecycle ×3, analysis views ×5).

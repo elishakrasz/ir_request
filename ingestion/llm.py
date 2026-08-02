@@ -138,6 +138,115 @@ def classify_request(subject: str, body: str, log=print) -> dict | None:
     return data
 
 
+ROUTING_CATEGORIES = ["process_blocker", "conviction", "deal_mechanics",
+                      "scheduling"]
+
+PROMO_SYSTEM = (
+    "You process inbound investor emails already flagged as information "
+    "requests for a private-equity IR team. For each, extract:\n"
+    "- title: ONE sentence stating what the sender wants (concrete, no filler)\n"
+    "- routing_category — exactly one of four; this drives who handles it:\n"
+    "  * process_blocker: Carta/KYC/subdoc/tax-form/wire mechanics preventing "
+    "completion (login issues, EIN/W-9 problems, doc re-sends)\n"
+    "  * conviction: substantive questions about the deal thesis — moat, "
+    "valuation, competitive comparisons, risks, track record\n"
+    "  * deal_mechanics: round size, timeline, structure, jurisdiction, "
+    "allocation, minimums\n"
+    "  * scheduling: calls, intros, meeting logistics\n"
+    "- category: finer label, one of Reporting, CapitalAccount, Valuation, "
+    "KYC-AML, SubscriptionDocs, Legal-SideLetter, Meeting, DataRoom, Other\n"
+    "- urgency (STATED only, never inferred): 'explicit_deadline' if a "
+    "date/time they need it by is stated (return it as ISO YYYY-MM-DD in "
+    "deadline), 'urgent_language' for urgent/ASAP/immediately, else 'none'."
+)
+
+PROMO_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "routing_category": {"type": "string", "enum": ROUTING_CATEGORIES},
+        "category": {"type": "string", "enum": [
+            "Reporting", "CapitalAccount", "Valuation", "KYC-AML",
+            "SubscriptionDocs", "Legal-SideLetter", "Meeting", "DataRoom",
+            "Other"]},
+        "urgency": {"type": "string",
+                    "enum": ["none", "urgent_language", "explicit_deadline"]},
+        "deadline": {"type": ["string", "null"]},
+    },
+    "required": ["title", "routing_category", "category", "urgency", "deadline"],
+    "additionalProperties": False,
+}
+
+LOST_SYSTEM = (
+    "You read the LAST inbound email from an investor prospect to a "
+    "private-equity IR team and judge whether it is an explicit decline of "
+    "the investment (e.g. 'we don't invest at valuations of this level', "
+    "'we're going to pass', 'not a fit for us'). Polite deferrals that leave "
+    "the door open ('not right now, keep us posted') are NOT declines. "
+    "Return declined plus a short verbatim-anchored reason."
+)
+
+LOST_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "declined": {"type": "boolean"},
+        "reason": {"type": "string"},
+    },
+    "required": ["declined", "reason"],
+    "additionalProperties": False,
+}
+
+
+def _single_call(system: str, schema: dict, prompt: str, cache_prefix: str,
+                 log=print) -> dict | None:
+    """One cached structured-output call on REQUEST_MODEL (shared plumbing for
+    promotion + closed-lost). Cache key = prefix + sha(prompt head)."""
+    if not available():
+        return None
+    cache = _load_cache()
+    ck = cache_prefix + cache_key(system[:40], prompt[:500])
+    if ck in cache:
+        return cache[ck]
+    import anthropic
+    client = anthropic.Anthropic(api_key=_api_key(), max_retries=4)
+    try:
+        resp = client.messages.create(
+            model=REQUEST_MODEL,
+            max_tokens=1024,
+            system=[{"type": "text", "text": system,
+                     "cache_control": {"type": "ephemeral"}}],
+            messages=[{"role": "user", "content": prompt[:4000]}],
+            output_config={"format": {"type": "json_schema", "schema": schema}},
+        )
+    except anthropic.APIStatusError as e:
+        log(f"[llm] {cache_prefix} call failed ({type(e).__name__}) — skipped")
+        return None
+    if resp.stop_reason == "refusal":
+        return None
+    try:
+        data = json.loads(next(b.text for b in resp.content if b.type == "text"))
+    except (json.JSONDecodeError, StopIteration):
+        log(f"[llm] {cache_prefix} response truncated "
+            f"(stop_reason={resp.stop_reason}) — skipped, not cached")
+        return None
+    cache[ck] = data
+    _save_cache(cache)
+    return data
+
+
+def classify_promotion(subject: str, snippet: str, log=print) -> dict | None:
+    """§0.2/§2.2: title + 4-way routing + fine category + urgency for a
+    request-flagged signal being promoted to an Information Request."""
+    return _single_call(PROMO_SYSTEM, PROMO_SCHEMA,
+                        f"Subject: {subject}\n\n{snippet}", "promo:", log)
+
+
+def classify_closed_lost(subject: str, snippet: str, log=print) -> dict | None:
+    """§6: explicit-decline detection on a keyword-prescreened last inbound."""
+    return _single_call(LOST_SYSTEM, LOST_SCHEMA,
+                        f"Subject: {subject}\n\n{snippet}", "lost:", log)
+
+
 def cache_key(sender: str, subject: str) -> str:
     return hashlib.sha256(f"{sender.lower()}|{subject.lower()}".encode()).hexdigest()[:32]
 

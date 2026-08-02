@@ -17,10 +17,15 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from .bizhours import WORKDAYS
 from .classify import RfiResult, classify
 from .config import Config, STATE_DIR
 from .latency import compute_response_pairs
 from . import llm, matching, noise
+
+# classify.py urgency labels → Choices.urgency keys
+URGENCY_KEY = {"none": "None", "urgent_language": "UrgentLanguage",
+               "explicit_deadline": "ExplicitDeadline"}
 
 FOLDERS = ("inbox", "sentitems")
 
@@ -57,9 +62,10 @@ def parse_ts(s: str) -> datetime:
 
 
 def add_business_days(d: datetime, n: int) -> datetime:
+    """Sun–Thu work week — the same convention as bizhours.business_minutes."""
     while n > 0:
         d += timedelta(days=1)
-        if d.weekday() < 5:
+        if d.weekday() in WORKDAYS:
             n -= 1
     return d
 
@@ -331,14 +337,26 @@ class SyncRun:
 
     def _create_rfi(self, signal_row, msg, rfi, cid, oppid):
         p, ch, cfg = self.cfg.prefix, self.cfg.choices, self.cfg
+        # request title = the LLM's one-sentence description when present
+        title = rfi.description or msg.get("subject") or "(no subject)"
+        # explicit deadline: LLM ISO date, validated; deadline also drives duedate
+        deadline_iso = None
+        if rfi.deadline:
+            try:
+                deadline_iso = datetime.fromisoformat(rfi.deadline).date().isoformat()
+            except ValueError:
+                pass
+        due = (parse_ts(deadline_iso) if deadline_iso
+               else add_business_days(msg["_ts"], cfg.rfi_due_bdays))
         body = {
-            f"{p}name": clip(msg.get("subject") or "(no subject)", 200),
+            f"{p}name": clip(title, 200),
             f"{p}status": ch.req_status["New"],
             f"{p}category": ch.req_category.get(rfi.category or "Other",
                                                 ch.req_category["Other"]),
             f"{p}receiveddate": msg["_ts"].strftime("%Y-%m-%dT%H:%M:%SZ"),
-            f"{p}duedate": add_business_days(msg["_ts"], cfg.rfi_due_bdays)
-            .strftime("%Y-%m-%dT%H:%M:%SZ"),
+            f"{p}duedate": due.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            f"{p}statedurgency": ch.urgency[URGENCY_KEY.get(rfi.urgency or "none",
+                                                            "None")],
             f"{p}aigenerated": True,
             f"{p}humanconfirmed": False,
             f"{p}contact@odata.bind": f"/contacts({cid})",
@@ -375,25 +393,35 @@ class SyncRun:
                 self.dv.patch(f"{p}engagementsignals", sid,
                               {f"{p}responselatencymin": minutes}, f"latency {sid[:8]}")
                 self.counts["latency_patched"] += 1
-            # Answered flip: Open inbound with a later outbound reply
-            last_out = max((s["ts"] for s in sigs if s["direction"] == "Outbound"),
-                           default=None)
-            if last_out:
-                open_ids = [s["id"] for s in sigs
-                            if s["rfistatus"] == ch.rfistatus["Open"]
-                            and s["direction"] == "Inbound" and s["ts"] < last_out]
-                for sid in open_ids:
+            # Answered flip: Open inbound with a later outbound reply. The
+            # matching request gets a completed timestamp (the answering
+            # outbound's ts) but the record stays for aging analytics.
+            out_ts = sorted(s["ts"] for s in sigs if s["direction"] == "Outbound")
+            if out_ts:
+                answered_at = {}     # signal id → ts of earliest later outbound
+                for s in sigs:
+                    if s["rfistatus"] == ch.rfistatus["Open"] \
+                            and s["direction"] == "Inbound":
+                        reply = next((t for t in out_ts if t > s["ts"]), None)
+                        if reply:
+                            answered_at[s["id"]] = reply
+                for sid in answered_at:
                     self.dv.patch(f"{p}engagementsignals", sid,
                                   {f"{p}rfistatus": ch.rfistatus["Answered"]},
                                   f"answered {sid[:8]}")
                     self.counts["answered"] += 1
-                if open_ids:
+                if answered_at:
                     open_vals = [ch.req_status["New"], ch.req_status["InProgress"]]
-                    for req in self.dv.requests_for_signals(open_ids, open_vals):
-                        self.dv.patch(f"{p}inforequests", req[f"{p}inforequestid"],
-                                      {f"{p}status":
-                                       ch.req_status[self.cfg.rfi_reply_status]},
-                                      f"request {req[f'{p}inforequestid'][:8]}")
+                    for req in self.dv.requests_for_signals(list(answered_at),
+                                                            open_vals):
+                        done = answered_at.get(
+                            req.get(f"_{p}sourcesignal_value"), out_ts[-1])
+                        self.dv.patch(
+                            f"{p}inforequests", req[f"{p}inforequestid"],
+                            {f"{p}status": ch.req_status["Completed"],
+                             f"{p}completeddate":
+                                 done.strftime("%Y-%m-%dT%H:%M:%SZ")},
+                            f"request {req[f'{p}inforequestid'][:8]} completed")
 
     # ── run ──────────────────────────────────────────────────────────────────
     def run(self, mailboxes=None, folders=FOLDERS) -> dict:

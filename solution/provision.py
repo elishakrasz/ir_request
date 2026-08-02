@@ -501,6 +501,21 @@ def main():
         ensure_attribute(api, req, a)
     ensure_option(api, sig, f"{p}matchmethod", "Regarding", value_base + 5)
 
+    # 10. close-readiness directive columns (2026-08-02). Until the next
+    # manual PROD solution import lands these, the analysis layer computes
+    # Is Primary at export time and routing lives in state/request_routing.json.
+    print("— close-readiness columns")
+    ensure_attribute(api, sig, bool_attr(
+        f"{p}isprimary", "Is Primary", default=True,
+        desc="§0.1 canonical attribution of this message within its opportunity "
+             "scope; duplicates keep attribution history but are excluded from "
+             "volume/latency rollups"))
+    ensure_attribute(api, req, picklist_attr(
+        f"{p}routingcategory", "Routing Category",
+        ["ProcessBlocker", "Conviction", "DealMechanics", "Scheduling"],
+        value_base,
+        desc="§2.2 four-way routing taxonomy — drives who handles the request"))
+
     n = len(api.creates)
     if args.apply:
         print(f"\nDone — {n} components created (or all existed). "
