@@ -22,6 +22,19 @@ def make_run(cfg, tmp_path, dv):
                    codeversion="test")
 
 
+def test_sane_deadline_bumps_wrong_year():
+    from ingestion.sync import sane_deadline
+    received = ts(31, 9)                       # 2026-07-31
+    # classifier emitted last year for "by 8/15" → bumped to 2026
+    assert sane_deadline("2025-08-15", received) == "2026-08-15"
+    # plausible deadlines pass through
+    assert sane_deadline("2026-08-15", received) == "2026-08-15"
+    # implausible even after bump → dropped
+    assert sane_deadline("2024-01-01", received) is None
+    assert sane_deadline(None, received) is None
+    assert sane_deadline("not-a-date", received) is None
+
+
 def test_add_business_days_sun_thu():
     # Thursday +2 → Fri/Sat skipped → Sunday, Monday
     assert add_business_days(ts(30, 6), 2) == datetime(2026, 8, 3, 6,

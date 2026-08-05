@@ -97,6 +97,9 @@ class Config:
     # ir@ intake (docs/ir-intake-design.md): mailboxes whose inbound mail is
     # ingested even from unknown senders (auto-created contacts). Empty = off.
     intake_mailboxes: list = field(default_factory=list)
+    # intake time floor: messages older than this never auto-create contacts
+    # (bounds a delta-reset re-walk to the agreed window; None = ingest floor)
+    intake_floor: datetime | None = None
 
     @classmethod
     def from_env(cls, env: dict | None = None):
@@ -125,5 +128,8 @@ class Config:
             rfi_reply_status=env.get("RFI_REPLY_STATUS", "WaitingExternal"),
             intake_mailboxes=[m.strip().lower() for m in
                               env.get("INTAKE_MAILBOXES", "").split(",") if m.strip()],
+            intake_floor=(datetime.fromisoformat(env["INTAKE_FLOOR"])
+                          .replace(tzinfo=timezone.utc)
+                          if env.get("INTAKE_FLOOR") else None),
             rules=Rules.load(Path(env.get("RULES_PATH", Path(__file__).parent / "rules.json"))),
         )

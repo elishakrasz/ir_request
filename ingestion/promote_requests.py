@@ -27,7 +27,8 @@ from collections import Counter, defaultdict
 from . import llm
 from .config import Config, STATE_DIR
 from .dataverse_client import DataverseClient
-from .sync import URGENCY_KEY, add_business_days, clip, parse_ts, say
+from .sync import (URGENCY_KEY, add_business_days, clip, parse_ts,
+                   sane_deadline, say)
 
 ROUTING_FILE = STATE_DIR / "request_routing.json"
 
@@ -104,10 +105,7 @@ def main():
         title = promo.get("title") or subject
         deadline = None
         if promo.get("urgency") == "explicit_deadline" and promo.get("deadline"):
-            try:
-                deadline = parse_ts(promo["deadline"]).date().isoformat()
-            except ValueError:
-                pass
+            deadline = sane_deadline(promo["deadline"], ts)
         due = parse_ts(deadline) if deadline else add_business_days(
             ts, cfg.rfi_due_bdays)
 

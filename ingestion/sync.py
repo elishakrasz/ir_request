@@ -66,6 +66,25 @@ def parse_ts(s: str) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
+def sane_deadline(deadline_iso: str | None, received: datetime) -> str | None:
+    """The classifier sometimes emits the wrong YEAR for 'by 8/15'-style
+    deadlines (found live: 2025-08-15 on a 2026-07-31 email). A deadline
+    before receipt gets bumped one year; still-implausible values are
+    dropped rather than stored."""
+    if not deadline_iso:
+        return None
+    try:
+        d = parse_ts(deadline_iso)
+    except ValueError:
+        return None
+    if d >= received:
+        return d.date().isoformat()
+    bumped = d.replace(year=d.year + 1)
+    if bumped >= received:
+        return bumped.date().isoformat()
+    return None
+
+
 def add_business_days(d: datetime, n: int) -> datetime:
     """Sun–Thu work week — the same convention as bizhours.business_minutes."""
     while n > 0:
@@ -403,13 +422,9 @@ class SyncRun:
         p, ch, cfg = self.cfg.prefix, self.cfg.choices, self.cfg
         # request title = the LLM's one-sentence description when present
         title = rfi.description or msg.get("subject") or "(no subject)"
-        # explicit deadline: LLM ISO date, validated; deadline also drives duedate
-        deadline_iso = None
-        if rfi.deadline:
-            try:
-                deadline_iso = datetime.fromisoformat(rfi.deadline).date().isoformat()
-            except ValueError:
-                pass
+        # explicit deadline: LLM ISO date, sanity-checked against receipt
+        # (wrong-year emissions get bumped or dropped — issue found live)
+        deadline_iso = sane_deadline(rfi.deadline, msg["_ts"])
         due = (parse_ts(deadline_iso) if deadline_iso
                else add_business_days(msg["_ts"], cfg.rfi_due_bdays))
         has_v2 = self.dv.has_attribute(f"{p}inforequest", f"{p}thirdparty")
@@ -556,9 +571,11 @@ class SyncRun:
             self.dv.has_attribute("contact", f"{cfg.prefix}autocreatedby")
         if cfg.intake_mailboxes and not intake_on:
             say("intake: contact.new_autocreatedby absent in this env — dormant")
+        intake_floor = cfg.intake_floor or cfg.ingest_floor
         for m in messages:
             m["_intake"] = (intake_on and m["_mailbox"] in cfg.intake_mailboxes
                             and m["_folder"] == "inbox"
+                            and m["_ts"] >= intake_floor
                             and matching.domain_of(m["_sender"])
                             not in cfg.org_domains)
         convs_needed = sorted({m["conversationId"] for m in messages
