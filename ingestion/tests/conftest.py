@@ -80,6 +80,7 @@ class FakeDataverse:
         self.p = "new_"
         self.signals: dict[str, dict] = {}     # id -> server-shaped row
         self.requests: dict[str, dict] = {}
+        self.contacts: dict[str, dict] = {}    # intake-created contacts
         self.intents: list[str] = []
         self.created = 0
         self.patched = 0
@@ -97,6 +98,9 @@ class FakeDataverse:
 
     def fetch_regarding_map(self, since_iso):
         return {}
+
+    def has_attribute(self, entity_logical, attr_logical):
+        return True   # fake env has every provisioned column
 
     def fetch_contacts(self, ids):
         return [dict(r) for r in CONTACT_ROWS if r["contactid"] in ids]
@@ -147,11 +151,22 @@ class FakeDataverse:
             row["new_engagementsignalid"] = f"sig-{self._n:04d}"
             row.setdefault("new_responselatencymin", None)
             self.signals[row["new_engagementsignalid"]] = row
+        elif entity_set == "contacts":
+            row["contactid"] = f"con-{self._n:04d}"
+            self.contacts[row["contactid"]] = row
         else:
             row["new_inforequestid"] = f"req-{self._n:04d}"
             self.requests[row["new_inforequestid"]] = row
         self.created += 1
         return dict(row)
+
+    def find_contact_by_email(self, email):
+        e = email.lower()
+        for r in self.contacts.values():
+            if any((r.get(f) or "").lower() == e
+                   for f in ("emailaddress1", "emailaddress2", "emailaddress3")):
+                return dict(r)
+        return None
 
     def patch(self, entity_set, row_id, payload, describe):
         self.intents.append(f"PATCH {describe}")

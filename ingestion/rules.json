@@ -11,6 +11,17 @@
     "cvent.com", "splashthat.com", "axios.com", "politico.com", "pitchbook.com",
     "crunchbase.com", "cbinsights.com"
   ],
+  "bulk_senders": [
+    "exigentcap.ir@apexgroup.com", "highpost.ir@apexgroup.com",
+    "portal@mail.investors.tzurmanagement.com", "exigent@carta.com",
+    "sponsordocs@inspirafinancial.com",
+    "sponsordocs@investor.inspirafinancial.com",
+    "notifications@digitalbanking.busey.com",
+    "donotreply@texascapitalbank.com"
+  ],
+  "bulk_sender_domains": [
+    "backstopsolutions.com", "docusign.net", "capcade.com"
+  ],
   "excluded_senders": ["no-reply@carta.com"],
   "excluded_domains": [],
   "excluded_keywords": ["unsubscribe", "privileged & confidential - legal"],

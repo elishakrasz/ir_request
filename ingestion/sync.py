@@ -27,6 +27,11 @@ from . import llm, matching, noise
 URGENCY_KEY = {"none": "None", "urgent_language": "UrgentLanguage",
                "explicit_deadline": "ExplicitDeadline"}
 
+# Categories that exist only in the v2 option set (DEV 2026-08-04). In an env
+# that predates the solution import they fold to Other — writing their option
+# values would 400. Same probe as the v2 columns: both land in one import.
+V2_ONLY_CATEGORIES = {"CapitalCall", "TaxDocs", "AccountAdmin", "LiquidityTransfer"}
+
 FOLDERS = ("inbox", "sentitems")
 
 # Stable message facts that may be corrected on re-sync. Volatile/owned-elsewhere
@@ -149,6 +154,7 @@ class SyncRun:
         self.error_samples = []
         self.touched_convs = set()
         self.new_signal_rfis = []   # (signal_id, msg, category)
+        self._intake_cache = {}     # sender email → contactid (per run)
 
     # ── delta state ──────────────────────────────────────────────────────────
     def _state_file(self, mailbox, folder) -> Path:
@@ -184,10 +190,14 @@ class SyncRun:
 
     # ── payload ──────────────────────────────────────────────────────────────
     def _payload(self, msg, cid, oppid, method, conf, status, direction,
-                 meaningful, snippet, mailbox, rfi, noise_reason=None):
+                 meaningful, snippet, mailbox, rfi, noise_reason=None,
+                 is_primary=True):
         p, ch = self.cfg.prefix, self.cfg.choices
         key = msg.get("internetMessageId") or msg["id"]
         body = {
+            # §0.1: one primary attribution per (opportunity, message); set at
+            # create time, never re-patched (backfill_close_columns repairs)
+            f"{p}isprimary": is_primary,
             f"{p}name": clip(msg.get("subject") or "(no subject)", 200),
             f"{p}channel": ch.channel["Email"],
             f"{p}direction": ch.direction[direction],
@@ -247,11 +257,6 @@ class SyncRun:
             c["excluded"] += 1
             return  # write_excluded=false → write nothing (config-driven)
 
-        contacts = msg["_contacts"]   # precomputed in run()
-        if not contacts:
-            c["no_contact"] += 1
-            return
-
         direction = matching.classify_direction(msg["_sender"], msg["_recipients"],
                                                 cfg.org_domains)
         meaningful = not matching.looks_autoreply(subject, msg["_sender"], cfg.rules)
@@ -259,10 +264,25 @@ class SyncRun:
         key = msg.get("internetMessageId") or msg["id"]
 
         # Noise gate (WS1): heuristic verdict precomputed in run(); LLM verdicts
-        # for candidates arrive via noise_verdicts.
+        # for candidates arrive via noise_verdicts. Resolved BEFORE the contact
+        # check so intake never creates contacts for noise senders.
         noise_reason = msg.get("_noise_reason")
         if noise_reason is None and noise_verdicts and msg["id"] in noise_verdicts:
             noise_reason = noise.llm_label_to_noise_reason(noise_verdicts[msg["id"]])
+
+        contacts = msg["_contacts"]   # precomputed in run()
+        if not contacts and msg.get("_intake") and direction == "Inbound" \
+                and meaningful and not noise_reason:
+            # ir@ intake (docs/ir-intake-design.md): unknown human sender to an
+            # intake mailbox → find-or-create a lightweight contact. In dry-run
+            # a to-be-created contact has no id yet — intent is recorded and
+            # the message is skipped until --apply.
+            cid = self._intake_contact(msg)
+            if cid:
+                contacts = {cid: set()}
+        if not contacts:
+            c["no_contact"] += 1
+            return
 
         # Enrichment GET — matched, non-noise messages only, apply mode only.
         # The (LLM) request classifier runs ONLY on the enriched body below —
@@ -283,6 +303,8 @@ class SyncRun:
                 # WS6: LLM request detection on confirmed-bound inbound only
                 rfi = classify(subject, body[:4000])  # body transient, never persisted
 
+        primary_groups = set()   # §0.1: first attribution per opp is primary
+        rfi_done = False         # ONE request per message, not per attribution
         for cid, oppids in contacts.items():
             if noise_reason:
                 oppid, method, conf, status = None, None, 0, "Excluded"
@@ -298,6 +320,12 @@ class SyncRun:
                 else:                       # < review_min → noise (spec 1.3)
                     status, noise_reason = "Excluded", "low_confidence"
                     oppid, method = (oppid, None)  # keep top candidate for audit
+                if msg.get("_intake") and noise_reason == "low_confidence":
+                    # intake-mailbox mail must reach the review queue, never
+                    # low-confidence noise (docs/ir-intake-design.md) — the
+                    # whole point is visibility of servicing traffic
+                    status = "Suggested" if oppid else "Unmatched"
+                    noise_reason = None
             c.setdefault("by_status", {}).setdefault(status, 0)
             c["by_status"][status] += 1
             c.setdefault("by_method", {}).setdefault(method or "none", 0)
@@ -309,9 +337,13 @@ class SyncRun:
                 fn = opp_meta[oppid]["fund_name"]
                 c.setdefault("by_fund", {}).setdefault(fn, 0)
                 c["by_fund"][fn] += 1
+            grp = oppid or f"c:{cid}"        # no-opp rows stay primary per contact
+            is_primary = grp not in primary_groups
+            primary_groups.add(grp)
             payload = self._payload(msg, cid, oppid, method, conf, status, direction,
                                     meaningful and not noise_reason, snippet,
-                                    msg["_mailbox"], rfi, noise_reason=noise_reason)
+                                    msg["_mailbox"], rfi, noise_reason=noise_reason,
+                                    is_primary=is_primary)
             existing = self.dv.get_signal(msg["_hash"], cid)
             desc = f"signal {msg['_hash'][:12]}…/{cid[:8]} [{direction}/{status}]"
             if existing is None:
@@ -320,8 +352,11 @@ class SyncRun:
                 if len(self.samples) < 5:
                     self.samples.append(payload)
                 if rfi.is_info_request and direction == "Inbound" and created \
-                        and not noise_reason:
+                        and not noise_reason and not rfi_done:
+                    # one ticket per email — the same message matched to N
+                    # contacts must not open N requests (dup-ticket fix)
                     self._create_rfi(created, msg, rfi, cid, oppid)
+                    rfi_done = True
             else:
                 delta = self._diff_for_update(existing, payload)
                 if delta:
@@ -334,6 +369,35 @@ class SyncRun:
                 conv_map[conv] = oppid    # thread inheritance within this run
             if conv and not noise_reason:
                 self.touched_convs.add(conv)
+
+    def _intake_contact(self, msg) -> str | None:
+        """Find-or-create a lightweight contact for an unknown intake-mailbox
+        sender (docs/ir-intake-design.md). Reuse-before-create: ANY existing
+        CRM contact with the address wins. Returns contactid, or None in
+        dry-run when the contact would need creating (intent recorded)."""
+        p, sender = self.cfg.prefix, msg["_sender"]
+        if sender in self._intake_cache:
+            return self._intake_cache[sender]
+        row = self.dv.find_contact_by_email(sender)
+        if row:
+            cid = row["contactid"]
+        else:
+            name = (((msg.get("from") or {}).get("emailAddress") or {})
+                    .get("name") or "").strip()
+            if not name or "@" in name:   # display name absent or is the address
+                name = sender.split("@")[0].replace(".", " ").title()
+            first, _, last = name.partition(" ")
+            body = {"firstname": first[:50], "emailaddress1": sender,
+                    f"{p}autocreatedby": f"ir-intake|{self.runid}"}
+            if last.strip():
+                body["lastname"] = last.strip()[:50]
+            created = self.dv.create("contacts", body, f"intake contact {sender}")
+            self.counts["intake_contacts"] = self.counts.get("intake_contacts", 0) + 1
+            if not created:
+                return None   # dry-run: no id to link yet
+            cid = created["contactid"]
+        self._intake_cache[sender] = cid
+        return cid
 
     def _create_rfi(self, signal_row, msg, rfi, cid, oppid):
         p, ch, cfg = self.cfg.prefix, self.cfg.choices, self.cfg
@@ -348,11 +412,14 @@ class SyncRun:
                 pass
         due = (parse_ts(deadline_iso) if deadline_iso
                else add_business_days(msg["_ts"], cfg.rfi_due_bdays))
+        has_v2 = self.dv.has_attribute(f"{p}inforequest", f"{p}thirdparty")
+        cat = rfi.category or "Other"
+        if not has_v2 and cat in V2_ONLY_CATEGORIES:
+            cat = "Other"
         body = {
             f"{p}name": clip(title, 200),
             f"{p}status": ch.req_status["New"],
-            f"{p}category": ch.req_category.get(rfi.category or "Other",
-                                                ch.req_category["Other"]),
+            f"{p}category": ch.req_category.get(cat, ch.req_category["Other"]),
             f"{p}receiveddate": msg["_ts"].strftime("%Y-%m-%dT%H:%M:%SZ"),
             f"{p}duedate": due.strftime("%Y-%m-%dT%H:%M:%SZ"),
             f"{p}statedurgency": ch.urgency[URGENCY_KEY.get(rfi.urgency or "none",
@@ -367,6 +434,17 @@ class SyncRun:
             body[f"{p}explicitdeadline"] = deadline_iso
         if oppid:
             body[f"{p}opportunity@odata.bind"] = f"/opportunities({oppid})"
+        # close-readiness §2.2: routing column (PROD since 2026-08-03 import)
+        if rfi.routing:
+            body[f"{p}routingcategory"] = ch.routing[rfi.routing]
+        # v2 taxonomy fields — provisioned to DEV 2026-08-04; written only once
+        # the columns exist in the target env (PROD gets them at the next
+        # manual solution import — same pattern as the §0.1 columns).
+        if has_v2:
+            body[f"{p}thirdparty"] = rfi.third_party
+            body[f"{p}classifierconfidence"] = rfi.confidence
+            if rfi.secondary and rfi.secondary in ch.req_category:
+                body[f"{p}secondarycategory"] = ch.req_category[rfi.secondary]
         self.dv.create(f"{p}inforequests", body, f"inforequest for {msg['_hash'][:12]}…")
         self.counts["rfi_created"] += 1
 
@@ -472,8 +550,20 @@ class SyncRun:
         for m in messages:
             m["_contacts"] = matching.match_contacts(m["_participants"], email_map,
                                                      cfg.org_domains)
+        # ir@ intake eligibility (docs/ir-intake-design.md): activates only when
+        # the marker column exists in the target env (dormant pre-import)
+        intake_on = bool(cfg.intake_mailboxes) and \
+            self.dv.has_attribute("contact", f"{cfg.prefix}autocreatedby")
+        if cfg.intake_mailboxes and not intake_on:
+            say("intake: contact.new_autocreatedby absent in this env — dormant")
+        for m in messages:
+            m["_intake"] = (intake_on and m["_mailbox"] in cfg.intake_mailboxes
+                            and m["_folder"] == "inbox"
+                            and matching.domain_of(m["_sender"])
+                            not in cfg.org_domains)
         convs_needed = sorted({m["conversationId"] for m in messages
-                               if m["_contacts"] and m.get("conversationId")})
+                               if (m["_contacts"] or m.get("_intake"))
+                               and m.get("conversationId")})
         say(f"conv-map: querying {len(convs_needed)} relevant conversations")
         conv_map = self.dv.confirmed_conv_opps(
             convs_needed, cfg.choices.matchstatus["Confirmed"])
@@ -488,7 +578,7 @@ class SyncRun:
         # WS1 noise gate — heuristics inline, LLM batch for candidates
         candidates = []
         for m in messages:
-            if not m["_contacts"]:
+            if not (m["_contacts"] or m.get("_intake")):
                 continue
             verdict, reason = noise.gate(
                 m["_sender"], m.get("subject") or "", m.get("bodyPreview") or "",

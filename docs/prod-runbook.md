@@ -24,6 +24,9 @@ PROD schema arrives ONLY via manual maker-portal solution import, never CLI.
    (read contact/opportunity/connection/email; CRUD+append on the two new
    tables; append-to contact/opportunity/systemuser) and assign it.
    **No System Customizer in PROD** — schema never changes there by CLI.
+   Role additions since: **Write on Contact** (WS5 summaries, done) and
+   **Create on Contact** (ir@ intake, 2026-08-05 — required before
+   `INTAKE_MAILBOXES` activates after the 1.1.0.1 solution import).
 3. Operator says "commit to PROD" → update `DATAVERSE_URL` in `.env`
    (and remove the provision-guard expectation: `provision.py` still refuses
    PROD — that stays true; only `sync`/`set_monitoring` run against PROD).

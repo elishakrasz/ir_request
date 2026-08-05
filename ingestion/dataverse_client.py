@@ -112,6 +112,33 @@ class DataverseClient:
                 f"emailaddress3&$filter={flt}"))
         return rows
 
+    def has_attribute(self, entity_logical: str, attr_logical: str) -> bool:
+        """Metadata probe, cached per run. Lets sync write columns that exist in
+        DEV but haven't reached PROD via manual solution import yet (the same
+        pattern as §0.1 close-readiness columns) without failing creates."""
+        cache = getattr(self, "_attr_cache", None)
+        if cache is None:
+            cache = self._attr_cache = {}
+        key = (entity_logical, attr_logical)
+        if key not in cache:
+            r = self._req(
+                "GET",
+                f"EntityDefinitions(LogicalName='{entity_logical}')/Attributes"
+                f"?$select=LogicalName&$filter=LogicalName eq '{attr_logical}'")
+            cache[key] = bool(r.status_code == 200 and r.json().get("value"))
+        return cache[key]
+
+    def find_contact_by_email(self, email: str) -> dict | None:
+        """ANY contact holding this address — the scope map only covers
+        opportunity-linked contacts, so intake reuse-before-create must ask
+        Dataverse directly (docs/ir-intake-design.md)."""
+        e = email.replace("'", "''")
+        rows = self.query(
+            "contacts?$select=contactid,fullname&$filter="
+            f"emailaddress1 eq '{e}' or emailaddress2 eq '{e}' "
+            f"or emailaddress3 eq '{e}'")
+        return rows[0] if rows else None
+
     # ── signal reads ─────────────────────────────────────────────────────────
     def get_signal(self, keyhash: str, contact_id: str) -> dict | None:
         p = self.p

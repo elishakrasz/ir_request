@@ -163,7 +163,13 @@ def open_requests(req: pd.DataFrame, now: datetime, th=THRESHOLDS):
         return req
     routing = load_routing()
     r = req.copy()
-    r["Routing"] = r["Source signal id"].map(routing).fillna("(unclassified)")
+    # stored column first (PROD since 2026-08-03), sidecar fallback
+    fallback = r["Source signal id"].map(routing)
+    if "Stored routing" in r.columns:
+        r["Routing"] = r["Stored routing"].combine_first(fallback)
+    else:
+        r["Routing"] = fallback
+    r["Routing"] = r["Routing"].fillna("(unclassified)")
     r["Suggested owner"] = r["Routing"].map(th.routing_owners).fillna("")
     r["Age (biz days)"] = [biz_days(v, now) for v in r["Received"]]
     open_mask = ~r["Status"].isin(["Completed", "Cancelled"])

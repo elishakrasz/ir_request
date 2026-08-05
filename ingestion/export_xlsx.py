@@ -67,9 +67,13 @@ def requests_frame(dv: DataverseClient, p: str) -> pd.DataFrame:
     rows = dv.query(
         f"{p}inforequests?$select={p}name,{p}status,{p}category,{p}receiveddate,"
         f"{p}duedate,{p}completeddate,{p}statedurgency,{p}explicitdeadline,"
-        f"{p}aigenerated,{p}humanconfirmed,_{p}contact_value,"
+        f"{p}routingcategory,{p}aigenerated,{p}humanconfirmed,_{p}contact_value,"
         f"_{p}opportunity_value,_{p}sourcesignal_value")
+    # stored choice label "ProcessBlocker" → analysis snake_case key
+    snake = {"ProcessBlocker": "process_blocker", "Conviction": "conviction",
+             "DealMechanics": "deal_mechanics", "Scheduling": "scheduling"}
     out = [{
+        "Stored routing": snake.get(lab(r, f"{p}routingcategory", "")),
         "Received": r.get(f"{p}receiveddate"),
         "Title": r.get(f"{p}name"),
         "Status": lab(r, f"{p}status"),
@@ -87,7 +91,8 @@ def requests_frame(dv: DataverseClient, p: str) -> pd.DataFrame:
     return pd.DataFrame(out, columns=[
         "Received", "Title", "Status", "Category", "Contact", "Opportunity",
         "Due", "Completed", "Stated urgency", "Explicit deadline",
-        "AI generated", "Human confirmed", "Source signal id"])
+        "AI generated", "Human confirmed", "Source signal id",
+        "Stored routing"])
 
 
 def scope_frames(dv: DataverseClient, cfg: Config):

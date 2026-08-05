@@ -21,6 +21,21 @@ def _domain_blocked(sender: str, rules: Rules) -> str | None:
     return None
 
 
+def _bulk_sender(sender: str, rules: Rules) -> str | None:
+    """Tier-0 admin/platform blast senders (2-yr ir@ analysis: ~52% of real
+    inbound). Exact address first, then domain suffix. Named fund-admin staff
+    (e.g. a person @apexgroup.com) are NOT listed — only the robot addresses."""
+    s = (sender or "").lower()
+    if s in (a.lower() for a in rules.bulk_senders):
+        return s
+    d = domain_of(s)
+    for blocked in rules.bulk_sender_domains:
+        b = blocked.lower()
+        if d == b or d.endswith("." + b):
+            return b
+    return None
+
+
 def header_noise(headers: list[dict]) -> str | None:
     """List/bulk header evidence (enrichment-time or probe-time only — delta
     payloads carry no headers; stored signals carry none either)."""
@@ -47,6 +62,11 @@ def gate(sender: str, subject: str, snippet: str, rules: Rules, *,
     b = _domain_blocked(sender, rules)
     if b:
         return "noise", f"blocklist:{b}"
+    # Tier-0 admin blasts — checked before the matched-contact shortcut on
+    # purpose: a robot address that happens to be a CRM contact is still a blast
+    blast = _bulk_sender(sender, rules)
+    if blast:
+        return "noise", f"admin_blast:{blast}"
     # An external sender who is neither a known contact nor internal, whose mail
     # only matched via recipients (the WSJ-cc case) → LLM decides, never dropped
     # outright (spec 1.1).

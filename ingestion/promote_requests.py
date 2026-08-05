@@ -127,6 +127,11 @@ def main():
         }
         if deadline:
             body[f"{p}explicitdeadline"] = deadline
+        rk = {"process_blocker": "ProcessBlocker", "conviction": "Conviction",
+              "deal_mechanics": "DealMechanics", "scheduling": "Scheduling"} \
+            .get(promo.get("routing_category"))
+        if rk:                       # routing column live in PROD since 08-03
+            body[f"{p}routingcategory"] = ch.routing[rk]
         if s.get(f"_{p}opportunity_value"):
             body[f"{p}opportunity@odata.bind"] = \
                 f"/opportunities({s[f'_{p}opportunity_value']})"

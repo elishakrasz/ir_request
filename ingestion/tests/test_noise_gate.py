@@ -104,3 +104,26 @@ def test_only_dead_opps_is_low_confidence(cfg):
 def test_no_candidates_zero(cfg):
     oid, method, conf = resolve_opportunity_v2("hi", "", set(), META, None)
     assert (oid, conf) == (None, 0) and disposition_for(conf, cfg) == "noise"
+
+
+# ── Tier-0 admin blasts (ir@ taxonomy, 2026-08-04) ───────────────────────────
+def test_admin_blast_sender_is_noise(cfg):
+    v, r = noise.gate("exigentcap.ir@apexgroup.com",
+                      "Exigent HP Fund I-A LP Capital Call 23", "", cfg.rules,
+                      sender_is_matched_contact=True,   # even if a CRM contact
+                      sender_is_internal=False)
+    assert (v, r) == ("noise", "admin_blast:exigentcap.ir@apexgroup.com")
+
+
+def test_admin_blast_domain_suffix_is_noise(cfg):
+    v, r = noise.gate("dse_na3@docusign.net", "Completed: forms", "", cfg.rules,
+                      sender_is_matched_contact=False, sender_is_internal=False)
+    assert (v, r) == ("noise", "admin_blast:docusign.net")
+
+
+def test_named_fund_admin_staff_not_blast(cfg):
+    # a person at the fund administrator is working correspondence, not a blast
+    v, r = noise.gate("esther.berman@apexgroup.com", "Investor Portal Credentials",
+                      "", cfg.rules,
+                      sender_is_matched_contact=False, sender_is_internal=False)
+    assert v == "candidate"   # falls through to the normal LLM triage path

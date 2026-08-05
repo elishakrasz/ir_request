@@ -1,12 +1,12 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<ImportExportXml version="9.2.26073.142" SolutionPackageVersion="9.2" languagecode="1033" generatedBy="CrmLive" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" OrganizationVersion="9.2.26073.142" OrganizationSchemaType="Full" CRMServerServiceabilityVersion="9.2.26073.00145">
+<ImportExportXml version="9.2.26073.146" SolutionPackageVersion="9.2" languagecode="1033" generatedBy="CrmLive" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" OrganizationVersion="9.2.26073.146" OrganizationSchemaType="Full" CRMServerServiceabilityVersion="9.2.26074.00134">
   <SolutionManifest>
     <UniqueName>EngagementDashboard</UniqueName>
     <LocalizedNames>
       <LocalizedName description="Engagement Dashboard" languagecode="1033" />
     </LocalizedNames>
     <Descriptions />
-    <Version>1.0.0.1</Version>
+    <Version>1.1.0.1</Version>
     <Managed>0</Managed>
     <Publisher>
       <UniqueName>DefaultPublisherorg27d8242c</UniqueName>

@@ -199,3 +199,61 @@ delivery_failure, suggested_closed_lost).
   prescreened candidates (cost story).
 
 Test count: 55 → 63 (rfi lifecycle ×3, analysis views ×5).
+
+---
+
+## ir@ triage taxonomy (operator-approved 2026-08-04)
+
+Derived from a 2-year read-only pull of ir@exigentcap.com
+(`docs/ir-triage-categories.md`); requirements fit vs. the team-based-IR
+meeting in `docs/requirements-eval.md`.
+
+- **Classifier v2** (`llm.py` REQUEST_SCHEMA / `classify.py` RfiResult):
+  13-category taxonomy (append-only: += CapitalCall, TaxDocs, AccountAdmin,
+  LiquidityTransfer), plus `secondary_category`, `third_party`, real
+  `confidence`. Cache prefix `req:` → `req2:` (invalidates v1-shaped verdicts).
+- **Schema** (provision.py §11, DEV applied 2026-08-04): 4 category options
+  (100000009–12) + `new_secondarycategory` / `new_thirdparty` /
+  `new_classifierconfidence` on `new_inforequest`. §10+§11 reach PROD together
+  at the next manual solution import; `sync._create_rfi` probes
+  `dv.has_attribute` and skips the new fields where absent, so PROD keeps
+  running unchanged meanwhile.
+- **Tier-0 admin-blast gate** (`rules.json` bulk_senders/bulk_sender_domains,
+  `noise.gate` → `admin_blast:<sender>`): fund-admin/platform robots (52% of
+  real ir@ inbound) recorded as noise, never classified, never a ticket.
+  Checked before the matched-contact shortcut. Named admin staff excluded
+  from the list on purpose.
+
+Test count: 63 → 67 (admin-blast gate ×3, v2 rfi fields ×1).
+
+---
+
+## ir@ intake — auto-created contacts (operator-approved 2026-08-05)
+
+Design: `docs/ir-intake-design.md` (option 1). Closes the structural gap where
+unknown senders to ir@ (39% of human threads: CPAs/custodians/advisors) died
+at `no_contact` before reaching the dashboard.
+
+- `INTAKE_MAILBOXES` env (set to ir@); intake activates per-env only when
+  `contact.new_autocreatedby` exists (`has_attribute` probe → dormant in PROD
+  until the 1.1.0.1 import).
+- Flow: noise gate first (incl. LLM triage for unknown senders) → reuse ANY
+  CRM contact holding the address (`find_contact_by_email` — the scope map
+  only sees opp-linked contacts) → else create marked lightweight contact →
+  signal lands Unmatched/Suggested (never `low_confidence` noise for intake
+  mail) → classifier v2 → ticket when `is_request`.
+- Sync `_handle` reordered: direction + noise resolve BEFORE the contact
+  check so noise never creates contacts. Dry-run records contact-create
+  intent and skips the message (no id to link).
+- Schema: `contact.new_autocreatedby` (provision §12, DEV applied
+  2026-08-05); solution re-exported at **1.1.0.1** — one pending PROD import
+  carries §10+§11+§12.
+- ⚠ PROD prerequisites: the 1.1.0.1 import, **Create on Contact** for the
+  Engagement Ingestion role (WS5 added Write only), `INTAKE_MAILBOXES` set
+  (already in `.env`).
+
+Also: classifier v2 hardened after a live find — `max_tokens` 512 → 2048
+(caps thinking+output on claude-opus-5; v2 schema responses truncated
+mid-JSON) and the parse now degrades gracefully like `_single_call`.
+
+Test count: 67 → 73 (intake ×5, pre-import category fold ×1).

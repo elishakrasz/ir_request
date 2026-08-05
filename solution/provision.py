@@ -516,6 +516,43 @@ def main():
         value_base,
         desc="§2.2 four-way routing taxonomy — drives who handles the request"))
 
+    # 11. ir@ triage taxonomy (2026-08-04, docs/ir-triage-categories.md;
+    # operator approved). Category options are APPEND-ONLY; the secondary
+    # picklist declares all 13 labels in the same order so Choices.req_category
+    # values apply to both columns.
+    print("— ir@ triage taxonomy columns")
+    REQ_CATEGORIES_V2 = ["Reporting", "CapitalAccount", "Valuation", "KYC-AML",
+                         "SubscriptionDocs", "Legal-SideLetter", "Meeting",
+                         "DataRoom", "Other",
+                         "CapitalCall", "TaxDocs", "AccountAdmin",
+                         "LiquidityTransfer"]
+    for i, name in enumerate(REQ_CATEGORIES_V2[9:], start=9):
+        ensure_option(api, req, f"{p}category", name, value_base + i)
+    for a in [
+        picklist_attr(f"{p}secondarycategory", "Secondary Category",
+                      REQ_CATEGORIES_V2, value_base,
+                      desc="Second topic when one email spans two categories "
+                           "(classifier v2); same option order as Category"),
+        bool_attr(f"{p}thirdparty", "Third Party",
+                  desc="Sender acts on behalf of an investor (CPA / advisor / "
+                       "family office / custodian / auditor) — verification "
+                       "rules differ"),
+        int_attr(f"{p}classifierconfidence", "Classifier Confidence",
+                 minv=0, maxv=100,
+                 desc="Classifier's own 0-100; low values feed the review "
+                      "queue. AI-generated — see aigenerated/humanconfirmed"),
+    ]:
+        ensure_attribute(api, req, a)
+
+    # 12. ir@ intake (docs/ir-intake-design.md, operator-approved 2026-08-05):
+    # marker distinguishing auto-created sender contacts from curated CRM rows.
+    # The intake path stays dormant in any env where this column is absent.
+    print("— ir@ intake column")
+    ensure_attribute(api, "contact", string_attr(
+        f"{p}autocreatedby", "Auto-Created By", 100,
+        desc="ir-intake|<runid> when this contact was auto-created from an "
+             "unknown sender to an intake mailbox; empty for curated contacts"))
+
     n = len(api.creates)
     if args.apply:
         print(f"\nDone — {n} components created (or all existed). "

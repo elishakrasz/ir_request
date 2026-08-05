@@ -74,3 +74,37 @@ def test_answered_flip_completes_request(cfg, tmp_path):
     req = dv.requests["req-1"]
     assert req["new_status"] == BASE + 4                         # Completed
     assert req["new_completeddate"] == "2026-07-29T10:00:00Z"    # reply ts
+
+
+def test_create_rfi_writes_v2_taxonomy_fields(cfg, tmp_path):
+    """Classifier v2: secondary/third_party/confidence land on the request row
+    (FakeDataverse reports the columns as existing)."""
+    dv = FakeDataverse(apply=True)
+    run = make_run(cfg, tmp_path, dv)
+    rfi = RfiResult(is_info_request=True, category="TaxDocs",
+                    secondary="Valuation", third_party=True, confidence=88,
+                    description="CPA needs the 2024 K-1 for River Oaks")
+    msg = {"subject": "K-1s", "_ts": ts(30, 9), "_hash": "k" * 64}
+    run._create_rfi({"new_engagementsignalid": "sig-0002"}, msg, rfi, ANNA, OPP1)
+    req = next(iter(dv.requests.values()))
+    assert req["new_category"] == BASE + 10            # TaxDocs (append-only)
+    assert req["new_secondarycategory"] == BASE + 2    # Valuation
+    assert req["new_thirdparty"] is True
+    assert req["new_classifierconfidence"] == 88
+
+
+def test_v2_category_folds_to_other_before_solution_import(cfg, tmp_path):
+    """PROD-before-import: v2-only categories must not write unknown option
+    values — they fold to Other and the v2 columns are skipped."""
+    dv = FakeDataverse(apply=True)
+    dv.has_attribute = lambda entity, attr: False   # env predates the import
+    run = make_run(cfg, tmp_path, dv)
+    rfi = RfiResult(is_info_request=True, category="CapitalCall",
+                    secondary="TaxDocs", third_party=True, confidence=90,
+                    description="Wire sent, please confirm receipt")
+    msg = {"subject": "Capital call", "_ts": ts(30, 9), "_hash": "c" * 64}
+    run._create_rfi({"new_engagementsignalid": "sig-0003"}, msg, rfi, ANNA, OPP1)
+    req = next(iter(dv.requests.values()))
+    assert req["new_category"] == BASE + 8            # Other
+    assert "new_thirdparty" not in req
+    assert "new_secondarycategory" not in req

@@ -67,17 +67,66 @@ NOISE_SCHEMA = {
 }
 
 
+# Category taxonomy v2 (2026-08-04, from the 2-year ir@ analysis in
+# docs/ir-triage-categories.md). APPEND-ONLY — order mirrors the Dataverse
+# local option set on new_inforequest.new_category / new_secondarycategory.
+ROUTING_CATEGORIES = ["process_blocker", "conviction", "deal_mechanics",
+                      "scheduling"]
+
+REQUEST_CATEGORIES = [
+    "Reporting", "CapitalAccount", "Valuation", "KYC-AML", "SubscriptionDocs",
+    "Legal-SideLetter", "Meeting", "DataRoom", "Other",
+    "CapitalCall", "TaxDocs", "AccountAdmin", "LiquidityTransfer",
+]
+
 REQUEST_SYSTEM = (
     "You screen inbound investor emails for a private-equity IR team, "
     "detecting information requests that require a response or action.\n"
     "An information request = the sender asks the firm for something: a "
     "document, a figure, a signature, a meeting, access, a status update, an "
-    "answer to a question. Mere pleasantries, FYIs, and confirmations are not "
-    "requests.\n"
-    "If it IS a request, also extract:\n"
+    "answer to a question, or a 'please confirm receipt'. NOT requests (they "
+    "still get a category): pleasantries and thank-yous; FYIs and generic "
+    "statements needing no reply; acknowledgments ('got it', 'received, "
+    "thanks'); investor commentary or opinions with no ask; automated "
+    "platform notifications (Carta/DocuSign status mail); newsletters and "
+    "mass announcements; our own message quoted back with no new ask. When "
+    "in doubt about whether a real ask exists, is_request = false — a missed "
+    "edge case is cheaper than a junk ticket.\n"
+    "Categories (pick the dominant topic as category; if a clearly present "
+    "second topic exists, return it as secondary_category, else null):\n"
+    "- CapitalCall: capital-call payment traffic — wire confirmations, missed "
+    "calls, amount/commitment disputes, management-fee pushback, payment "
+    "routing\n"
+    "- TaxDocs: K-1s (availability/resends/missing), W-8/W-9, tax returns, "
+    "CPA document collection\n"
+    "- Valuation: current valuation, share counts, NAV, price-per-share, "
+    "custodian year-end valuations\n"
+    "- Reporting: fund-level reports, quarterly reports, audit-support info\n"
+    "- CapitalAccount: capital account statements — requests, resends, "
+    "discrepancies\n"
+    "- SubscriptionDocs: subscription/onboarding support — Carta issues, "
+    "signature failures, subscription document access, account opening forms\n"
+    "- KYC-AML: identity documents, FATCA/CRS, compliance verification\n"
+    "- AccountAdmin: portal access/passwords, distribution-list changes, "
+    "address/email changes, advisor access grants, ownership transfers "
+    "between own entities\n"
+    "- LiquidityTransfer: sell/hold elections, redemptions, distribution "
+    "tracing, secondary interest, share transfers to brokerage (DTC)\n"
+    "- Legal-SideLetter, Meeting (scheduling), DataRoom, Other: as named\n"
+    "Also extract:\n"
+    "- routing_category — exactly one of four; this drives WHO handles it:\n"
+    "  * process_blocker: Carta/KYC/subdoc/tax-form/wire mechanics preventing "
+    "completion\n"
+    "  * conviction: substantive deal-thesis questions (moat, valuation, "
+    "comparisons, risks)\n"
+    "  * deal_mechanics: round size, timeline, structure, jurisdiction, "
+    "allocation\n"
+    "  * scheduling: calls, intros, meeting logistics\n"
     "- description: ONE sentence stating what they want (concrete, no filler)\n"
-    "- category: one of Reporting, CapitalAccount, Valuation, KYC-AML, "
-    "SubscriptionDocs, Legal-SideLetter, Meeting, DataRoom, Other\n"
+    "- third_party: true when the sender acts on behalf of an investor (CPA, "
+    "wealth advisor, family office, IRA custodian, auditor, bank) rather than "
+    "being the investor\n"
+    "- confidence: 0-100, how certain you are of the category + is_request\n"
     "- urgency (STATED urgency only — never inferred): 'explicit_deadline' if "
     "a date/time by which they need it is stated (also return the date as "
     "ISO YYYY-MM-DD), 'urgent_language' if words like urgent/ASAP/immediately "
@@ -89,16 +138,22 @@ REQUEST_SCHEMA = {
     "properties": {
         "is_request": {"type": "boolean"},
         "description": {"type": "string"},
-        "category": {"type": "string", "enum": [
-            "Reporting", "CapitalAccount", "Valuation", "KYC-AML",
-            "SubscriptionDocs", "Legal-SideLetter", "Meeting", "DataRoom",
-            "Other"]},
+        "category": {"type": "string", "enum": REQUEST_CATEGORIES},
+        "routing_category": {"type": "string", "enum": ROUTING_CATEGORIES},
+        "secondary_category": {"anyOf": [
+            {"type": "string", "enum": REQUEST_CATEGORIES},
+            {"type": "null"},
+        ]},
+        "third_party": {"type": "boolean"},
+        "confidence": {"type": "integer"},
         "urgency": {"type": "string",
                     "enum": ["none", "urgent_language", "explicit_deadline"]},
         "deadline": {"type": ["string", "null"],
                      "description": "ISO date if explicit_deadline else null"},
     },
-    "required": ["is_request", "description", "category", "urgency", "deadline"],
+    "required": ["is_request", "description", "category", "routing_category",
+                 "secondary_category", "third_party", "confidence", "urgency",
+                 "deadline"],
     "additionalProperties": False,
 }
 
@@ -110,7 +165,9 @@ def classify_request(subject: str, body: str, log=print) -> dict | None:
     if not available():
         return None
     cache = _load_cache()
-    ck = "req:" + cache_key(subject, body[:500])
+    # req3: v2 taxonomy + routing_category (close-readiness §2.2) — the
+    # prefix bump invalidates older-shaped cached verdicts without a purge
+    ck = "req3:" + cache_key(subject, body[:500])
     if ck in cache:
         return cache[ck]
     import anthropic
@@ -118,7 +175,9 @@ def classify_request(subject: str, body: str, log=print) -> dict | None:
     try:
         resp = client.messages.create(
             model=REQUEST_MODEL,
-            max_tokens=512,
+            # max_tokens caps thinking + output together on claude-opus-5 —
+            # 512 truncated v2-schema responses mid-JSON (found live 2026-08-05)
+            max_tokens=2048,
             system=[{"type": "text", "text": REQUEST_SYSTEM,
                      "cache_control": {"type": "ephemeral"}}],
             messages=[{"role": "user",
@@ -132,14 +191,16 @@ def classify_request(subject: str, body: str, log=print) -> dict | None:
         return None
     if resp.stop_reason == "refusal":
         return None
-    data = json.loads(next(b.text for b in resp.content if b.type == "text"))
+    try:
+        data = json.loads(next(b.text for b in resp.content if b.type == "text"))
+    except (json.JSONDecodeError, StopIteration):
+        log(f"[llm] request classify response truncated "
+            f"(stop_reason={resp.stop_reason}) — skipped, not cached")
+        return None
     cache[ck] = data
     _save_cache(cache)
     return data
 
-
-ROUTING_CATEGORIES = ["process_blocker", "conviction", "deal_mechanics",
-                      "scheduling"]
 
 PROMO_SYSTEM = (
     "You process inbound investor emails already flagged as information "

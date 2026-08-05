@@ -24,6 +24,10 @@ def load_env(path: Path = REPO / ".env") -> dict:
 @dataclass
 class Rules:
     noise_domains: list = field(default_factory=list)
+    # Tier-0 admin/platform distributions (fund-admin blasts, portal robots):
+    # recorded as noise (reason admin_blast) — never classified, never a ticket.
+    bulk_senders: list = field(default_factory=list)
+    bulk_sender_domains: list = field(default_factory=list)
     excluded_senders: list = field(default_factory=list)
     excluded_domains: list = field(default_factory=list)
     excluded_keywords: list = field(default_factory=list)
@@ -56,11 +60,17 @@ class Choices:
         self.req_status = {"New": base, "InProgress": base + 1, "WaitingInternal": base + 2,
                            "WaitingExternal": base + 3, "Completed": base + 4,
                            "Cancelled": base + 5}
+        # APPEND-ONLY — the last four were added 2026-08-04 (ir@ taxonomy,
+        # docs/ir-triage-categories.md); order mirrors the option-set values.
         self.req_category = {n: base + i for i, n in enumerate(
             ["Reporting", "CapitalAccount", "Valuation", "KYC-AML", "SubscriptionDocs",
-             "Legal-SideLetter", "Meeting", "DataRoom", "Other"])}
+             "Legal-SideLetter", "Meeting", "DataRoom", "Other",
+             "CapitalCall", "TaxDocs", "AccountAdmin", "LiquidityTransfer"])}
         self.urgency = {"None": base, "UrgentLanguage": base + 1,
                         "ExplicitDeadline": base + 2}   # v2 WS6 (new_statedurgency)
+        # close-readiness §2.2 routing (new_routingcategory, PROD 2026-08-03+)
+        self.routing = {"ProcessBlocker": base, "Conviction": base + 1,
+                        "DealMechanics": base + 2, "Scheduling": base + 3}
         self.rev_direction = {v: k for k, v in self.direction.items()}
         self.rev_matchmethod = {v: k for k, v in self.matchmethod.items()}
 
@@ -84,6 +94,9 @@ class Config:
     # review_min..auto_confirm_min-1 → needs_review; <review_min → noise
     auto_confirm_min: int = 85
     review_min: int = 50
+    # ir@ intake (docs/ir-intake-design.md): mailboxes whose inbound mail is
+    # ingested even from unknown senders (auto-created contacts). Empty = off.
+    intake_mailboxes: list = field(default_factory=list)
 
     @classmethod
     def from_env(cls, env: dict | None = None):
@@ -110,5 +123,7 @@ class Config:
             review_min=int(env.get("REVIEW_MIN", "50")),
             rfi_due_bdays=int(env.get("RFI_DUE_BDAYS", "2")),
             rfi_reply_status=env.get("RFI_REPLY_STATUS", "WaitingExternal"),
+            intake_mailboxes=[m.strip().lower() for m in
+                              env.get("INTAKE_MAILBOXES", "").split(",") if m.strip()],
             rules=Rules.load(Path(env.get("RULES_PATH", Path(__file__).parent / "rules.json"))),
         )
