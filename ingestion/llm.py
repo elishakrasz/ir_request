@@ -77,6 +77,7 @@ REQUEST_CATEGORIES = [
     "Reporting", "CapitalAccount", "Valuation", "KYC-AML", "SubscriptionDocs",
     "Legal-SideLetter", "Meeting", "DataRoom", "Other",
     "CapitalCall", "TaxDocs", "AccountAdmin", "LiquidityTransfer",
+    "NDA",  # v3 2026-08-06 (append-only)
 ]
 
 REQUEST_SYSTEM = (
@@ -112,7 +113,12 @@ REQUEST_SYSTEM = (
     "between own entities\n"
     "- LiquidityTransfer: sell/hold elections, redemptions, distribution "
     "tracing, secondary interest, share transfers to brokerage (DTC)\n"
-    "- Legal-SideLetter, Meeting (scheduling), DataRoom, Other: as named\n"
+    "- NDA: non-disclosure / confidentiality agreements in onboarding or due "
+    "diligence — sending, signing, redlining, countersigning, or chasing an "
+    "NDA (including mutual NDAs and NDA+non-circumvent bundles)\n"
+    "- Legal-SideLetter: side letters, LPA amendments, consent solicitations, "
+    "and other legal terms that are NOT an NDA\n"
+    "- Meeting (scheduling), DataRoom, Other: as named\n"
     "Also extract:\n"
     "- routing_category — exactly one of four; this drives WHO handles it:\n"
     "  * process_blocker: Carta/KYC/subdoc/tax-form/wire mechanics preventing "

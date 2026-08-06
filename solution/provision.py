@@ -544,6 +544,21 @@ def main():
     ]:
         ensure_attribute(api, req, a)
 
+    # 11b. v3 category taxonomy (2026-08-06, operator-approved): add NDA and put
+    # the same category picklist on the engagement signal so every ir@-route
+    # email is tagged, not just the ones that become requests. APPEND-ONLY —
+    # NDA is index 13 on both request columns; the signal picklist declares all
+    # 14 labels in the same order so Choices.req_category values apply verbatim.
+    print("— v3 category taxonomy (NDA + signal category)")
+    REQ_CATEGORIES_V3 = REQ_CATEGORIES_V2 + ["NDA"]
+    ensure_option(api, req, f"{p}category", "NDA", value_base + 13)
+    ensure_option(api, req, f"{p}secondarycategory", "NDA", value_base + 13)
+    ensure_attribute(api, sig, picklist_attr(
+        f"{p}category", "Category", REQ_CATEGORIES_V3, value_base,
+        desc="LLM topic category for this email (v3). Same option order/values "
+             "as new_inforequest.new_category; written for signals on the "
+             "restricted ir@ route (TAG_SIGNAL_CATEGORY). Dormant where absent."))
+
     # 12. ir@ intake (docs/ir-intake-design.md, operator-approved 2026-08-05):
     # marker distinguishing auto-created sender contacts from curated CRM rows.
     # The intake path stays dormant in any env where this column is absent.

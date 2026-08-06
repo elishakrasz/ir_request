@@ -207,6 +207,21 @@ class SyncRun:
         m["_hash"] = hashlib.sha256(key.encode()).hexdigest()
         return True
 
+    # ── category ──────────────────────────────────────────────────────────────
+    def _category_value(self, cat: str | None) -> int:
+        """Category label → option value, folding labels the target env's option
+        set doesn't have yet (writing a missing option value 400s). NDA and the
+        signal new_category column arrive together in the v3 import — until then
+        NDA folds to Legal-SideLetter. The v2 four fold to Other in envs that
+        predate the 2026-08-04 import (same probe as the v2 columns)."""
+        p, ch = self.cfg.prefix, self.cfg.choices
+        cat = cat or "Other"
+        if cat == "NDA" and not self.dv.has_attribute(f"{p}engagementsignal", f"{p}category"):
+            cat = "Legal-SideLetter"
+        if cat in V2_ONLY_CATEGORIES and not self.dv.has_attribute(f"{p}inforequest", f"{p}thirdparty"):
+            cat = "Other"
+        return ch.req_category.get(cat, ch.req_category["Other"])
+
     # ── payload ──────────────────────────────────────────────────────────────
     def _payload(self, msg, cid, oppid, method, conf, status, direction,
                  meaningful, snippet, mailbox, rfi, noise_reason=None,
@@ -242,6 +257,12 @@ class SyncRun:
             body[f"{p}opportunity@odata.bind"] = f"/opportunities({oppid})"
         if noise_reason:
             body[f"{p}noisereason"] = clip(noise_reason, 100)
+        # v3: tag the signal itself with the LLM category (ir@ route only).
+        # Set at create time; inert until the new_category column exists in the
+        # target env (probe cached per run), so it never 400s in PROD pre-import.
+        if self.cfg.tag_signal_category and rfi.category \
+                and self.dv.has_attribute(f"{p}engagementsignal", f"{p}category"):
+            body[f"{p}category"] = self._category_value(rfi.category)
         return body
 
     def _diff_for_update(self, existing, payload):
@@ -431,13 +452,10 @@ class SyncRun:
         due = (parse_ts(deadline_iso) if deadline_iso
                else add_business_days(msg["_ts"], cfg.rfi_due_bdays))
         has_v2 = self.dv.has_attribute(f"{p}inforequest", f"{p}thirdparty")
-        cat = rfi.category or "Other"
-        if not has_v2 and cat in V2_ONLY_CATEGORIES:
-            cat = "Other"
         body = {
             f"{p}name": clip(title, 200),
             f"{p}status": ch.req_status["New"],
-            f"{p}category": ch.req_category.get(cat, ch.req_category["Other"]),
+            f"{p}category": self._category_value(rfi.category),
             f"{p}receiveddate": msg["_ts"].strftime("%Y-%m-%dT%H:%M:%SZ"),
             f"{p}duedate": due.strftime("%Y-%m-%dT%H:%M:%SZ"),
             f"{p}statedurgency": ch.urgency[URGENCY_KEY.get(rfi.urgency or "none",
@@ -462,7 +480,7 @@ class SyncRun:
             body[f"{p}thirdparty"] = rfi.third_party
             body[f"{p}classifierconfidence"] = rfi.confidence
             if rfi.secondary and rfi.secondary in ch.req_category:
-                body[f"{p}secondarycategory"] = ch.req_category[rfi.secondary]
+                body[f"{p}secondarycategory"] = self._category_value(rfi.secondary)
         self.dv.create(f"{p}inforequests", body, f"inforequest for {msg['_hash'][:12]}…")
         self.counts["rfi_created"] += 1
 

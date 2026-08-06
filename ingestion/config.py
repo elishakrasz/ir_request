@@ -65,7 +65,8 @@ class Choices:
         self.req_category = {n: base + i for i, n in enumerate(
             ["Reporting", "CapitalAccount", "Valuation", "KYC-AML", "SubscriptionDocs",
              "Legal-SideLetter", "Meeting", "DataRoom", "Other",
-             "CapitalCall", "TaxDocs", "AccountAdmin", "LiquidityTransfer"])}
+             "CapitalCall", "TaxDocs", "AccountAdmin", "LiquidityTransfer",
+             "NDA"])}  # v3 2026-08-06 (append-only): NDA sign/redline/countersign
         self.urgency = {"None": base, "UrgentLanguage": base + 1,
                         "ExplicitDeadline": base + 2}   # v2 WS6 (new_statedurgency)
         # close-readiness §2.2 routing (new_routingcategory, PROD 2026-08-03+)
@@ -103,6 +104,11 @@ class Config:
     # Option-B split: only the restricted IR-request route creates Information
     # Requests. The broad engagement sync sets this False (signals only).
     create_requests: bool = True
+    # v3 (2026-08-06): tag the engagement signal itself with its LLM category
+    # (not just the request). Set True only on the restricted ir@ route; the
+    # write is additionally gated by the new_category column existing in the
+    # target env, so it no-ops until the v3 solution import lands.
+    tag_signal_category: bool = False
 
     @classmethod
     def from_env(cls, env: dict | None = None):
@@ -135,5 +141,6 @@ class Config:
                           .replace(tzinfo=timezone.utc)
                           if env.get("INTAKE_FLOOR") else None),
             create_requests=env.get("CREATE_REQUESTS", "1") != "0",
+            tag_signal_category=env.get("TAG_SIGNAL_CATEGORY", "0") == "1",
             rules=Rules.load(Path(env.get("RULES_PATH", Path(__file__).parent / "rules.json"))),
         )

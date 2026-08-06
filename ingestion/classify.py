@@ -42,8 +42,13 @@ def classify(subject: str, text: str, backend: str | None = None) -> RfiResult:
     if backend == "stub" or not text:
         return RfiResult()
     data = llm.classify_request(subject, text)
-    if not data or not data.get("is_request"):
+    if not data:
         return RfiResult()
+    # Every screened email carries a category — the prompt assigns one even to
+    # non-requests (pleasantries/FYIs still get a topic). is_info_request stays
+    # the gate for creating a ticket; category is kept so the signal itself can
+    # be tagged (v3, ir@ route). No LLM data at all → empty RfiResult above.
+    is_req = bool(data.get("is_request"))
     # snake_case LLM label → Choices.routing key (None when absent, e.g. from
     # cache entries that predate the routing field)
     routing_key = {"process_blocker": "ProcessBlocker",
@@ -51,7 +56,7 @@ def classify(subject: str, text: str, backend: str | None = None) -> RfiResult:
                    "deal_mechanics": "DealMechanics",
                    "scheduling": "Scheduling"}.get(data.get("routing_category"))
     return RfiResult(
-        is_info_request=True,
+        is_info_request=is_req,
         category=data.get("category") or "Other",
         routing=routing_key,
         secondary=data.get("secondary_category"),

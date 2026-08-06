@@ -53,6 +53,7 @@ def main():
         intake_mailboxes=[],        # CRM-only: unknown senders dropped
         ingest_floor=floor,
         create_requests=True,       # the only route that opens tickets
+        tag_signal_category=True,   # v3: category-tag every signal on this route
     )
 
     # Graph: dedicated restricted app if configured, else main app (dry-run).
