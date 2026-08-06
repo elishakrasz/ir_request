@@ -100,6 +100,9 @@ class Config:
     # intake time floor: messages older than this never auto-create contacts
     # (bounds a delta-reset re-walk to the agreed window; None = ingest floor)
     intake_floor: datetime | None = None
+    # Option-B split: only the restricted IR-request route creates Information
+    # Requests. The broad engagement sync sets this False (signals only).
+    create_requests: bool = True
 
     @classmethod
     def from_env(cls, env: dict | None = None):
@@ -131,5 +134,6 @@ class Config:
             intake_floor=(datetime.fromisoformat(env["INTAKE_FLOOR"])
                           .replace(tzinfo=timezone.utc)
                           if env.get("INTAKE_FLOOR") else None),
+            create_requests=env.get("CREATE_REQUESTS", "1") != "0",
             rules=Rules.load(Path(env.get("RULES_PATH", Path(__file__).parent / "rules.json"))),
         )

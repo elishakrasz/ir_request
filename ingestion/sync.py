@@ -370,10 +370,13 @@ class SyncRun:
                 c["creates"] += 1
                 if len(self.samples) < 5:
                     self.samples.append(payload)
-                if rfi.is_info_request and direction == "Inbound" and created \
+                if self.cfg.create_requests and rfi.is_info_request \
+                        and direction == "Inbound" and created \
                         and not noise_reason and not rfi_done:
                     # one ticket per email — the same message matched to N
-                    # contacts must not open N requests (dup-ticket fix)
+                    # contacts must not open N requests (dup-ticket fix).
+                    # Option B: only the restricted IR-request route creates
+                    # requests (cfg.create_requests); the broad sync = signals only.
                     self._create_rfi(created, msg, rfi, cid, oppid)
                     rfi_done = True
             else:
