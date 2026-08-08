@@ -391,15 +391,24 @@ class SyncRun:
                 c["creates"] += 1
                 if len(self.samples) < 5:
                     self.samples.append(payload)
+                third_party_skip = (self.cfg.suppress_third_party_requests
+                                     and rfi.third_party)
                 if self.cfg.create_requests and rfi.is_info_request \
                         and direction == "Inbound" and created \
-                        and not noise_reason and not rfi_done:
+                        and not noise_reason and not rfi_done \
+                        and not third_party_skip:
                     # one ticket per email — the same message matched to N
                     # contacts must not open N requests (dup-ticket fix).
                     # Option B: only the restricted IR-request route creates
                     # requests (cfg.create_requests); the broad sync = signals only.
+                    # 3rd-party (advisor/bank/custodian) senders log a signal but
+                    # open no ticket — the feed stays investor inquiries only.
                     self._create_rfi(created, msg, rfi, cid, oppid)
                     rfi_done = True
+                elif third_party_skip and rfi.is_info_request and created \
+                        and direction == "Inbound" and not noise_reason:
+                    self.counts.setdefault("rfi_skipped_thirdparty", 0)
+                    self.counts["rfi_skipped_thirdparty"] += 1
             else:
                 delta = self._diff_for_update(existing, payload)
                 if delta:

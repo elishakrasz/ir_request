@@ -106,6 +106,82 @@ def test_create_rfi_writes_v2_taxonomy_fields(cfg, tmp_path):
     assert req["new_classifierconfidence"] == 88
 
 
+def test_nda_category_writes_when_column_present(cfg, tmp_path):
+    """v3: NDA is a real option value (base+13) once the import has landed."""
+    dv = FakeDataverse(apply=True)                     # has_attribute → True
+    run = make_run(cfg, tmp_path, dv)
+    rfi = RfiResult(is_info_request=True, category="NDA",
+                    description="Please countersign the mutual NDA")
+    msg = {"subject": "NDA", "_ts": ts(30, 9), "_hash": "n" * 64}
+    run._create_rfi({"new_engagementsignalid": "sig-nda"}, msg, rfi, ANNA, OPP1)
+    req = next(iter(dv.requests.values()))
+    assert req["new_category"] == BASE + 13            # NDA (append-only)
+
+
+def test_nda_folds_to_sideletter_before_v3_import(cfg, tmp_path):
+    """PROD-before-import: NDA has no option value yet → folds to Legal-SideLetter
+    (index 5) rather than writing an unknown option (which would 400)."""
+    dv = FakeDataverse(apply=True)
+    dv.has_attribute = lambda entity, attr: False
+    run = make_run(cfg, tmp_path, dv)
+    rfi = RfiResult(is_info_request=True, category="NDA", description="NDA please")
+    msg = {"subject": "NDA", "_ts": ts(30, 9), "_hash": "m" * 64}
+    run._create_rfi({"new_engagementsignalid": "sig-nda2"}, msg, rfi, ANNA, OPP1)
+    req = next(iter(dv.requests.values()))
+    assert req["new_category"] == BASE + 5             # Legal-SideLetter
+
+
+def _matched_inbound_msg():
+    """External inbound message that resolves Confirmed to OPP1 via regarding_opp,
+    so a request would be created absent any suppression."""
+    return {
+        "id": "graph-tp-1", "subject": "Transfer instructions",
+        "bodyPreview": "We need IBAN and ISIN before delivery.",
+        "conversationId": "CONV-TP-1", "internetMessageId": "<tp1@x>",
+        "from": {"emailAddress": {"address": "team@bankleumi.com", "name": "P&D"}},
+        "webLink": "https://outlook/tp1",
+        "_ts": datetime(2026, 8, 4, 9, tzinfo=timezone.utc),
+        "_sender": "team@bankleumi.com", "_recipients": ["ir@exigentcap.com"],
+        "_participants": ["team@bankleumi.com", "ir@exigentcap.com"],
+        "_hash": "t" * 64, "_mailbox": "ir@exigentcap.com", "_folder": "inbox",
+        "_contacts": {ANNA: {OPP1}}, "_intake": False, "_noise_reason": None,
+    }
+
+
+def test_third_party_request_suppressed_signal_kept(cfg, tmp_path, monkeypatch):
+    """suppress_third_party_requests: a third-party sender logs a signal but
+    opens no ticket; the skip is counted."""
+    from ingestion import sync as sync_mod
+    dv = FakeDataverse(apply=True)
+    cfg.suppress_third_party_requests = True
+    cfg.create_requests = True
+    run = make_run(cfg, tmp_path, dv)
+    monkeypatch.setattr(sync_mod, "classify", lambda subj, body: RfiResult(
+        is_info_request=True, third_party=True, category="LiquidityTransfer",
+        description="Bank asks for IBAN/ISIN"))
+    msg = _matched_inbound_msg()
+    run._handle(msg, {}, {}, {}, {}, regarding_map={msg["internetMessageId"]: OPP1})
+    assert not dv.requests                              # no ticket opened
+    assert dv.signals                                   # signal still logged
+    assert run.counts.get("rfi_skipped_thirdparty") == 1
+
+
+def test_non_third_party_request_still_created(cfg, tmp_path, monkeypatch):
+    """Control: with suppression on, a NON-third-party sender still opens a ticket."""
+    from ingestion import sync as sync_mod
+    dv = FakeDataverse(apply=True)
+    cfg.suppress_third_party_requests = True
+    cfg.create_requests = True
+    run = make_run(cfg, tmp_path, dv)
+    monkeypatch.setattr(sync_mod, "classify", lambda subj, body: RfiResult(
+        is_info_request=True, third_party=False, category="SubscriptionDocs",
+        description="Investor asks to re-send subscription docs"))
+    msg = _matched_inbound_msg()
+    run._handle(msg, {}, {}, {}, {}, regarding_map={msg["internetMessageId"]: OPP1})
+    assert dv.requests                                  # ticket opened
+    assert run.counts.get("rfi_skipped_thirdparty") is None
+
+
 def test_v2_category_folds_to_other_before_solution_import(cfg, tmp_path):
     """PROD-before-import: v2-only categories must not write unknown option
     values — they fold to Other and the v2 columns are skipped."""

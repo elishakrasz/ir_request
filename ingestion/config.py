@@ -109,6 +109,11 @@ class Config:
     # write is additionally gated by the new_category column existing in the
     # target env, so it no-ops until the v3 solution import lands.
     tag_signal_category: bool = False
+    # (2026-08-08): don't open a request when the sender is a third party (CPA /
+    # advisor / bank / custodian / law firm acting for — or instead of — an
+    # investor). The signal is still logged + category-tagged; only the ticket
+    # is suppressed, keeping the request feed to genuine investor inquiries.
+    suppress_third_party_requests: bool = False
 
     @classmethod
     def from_env(cls, env: dict | None = None):
@@ -142,5 +147,6 @@ class Config:
                           if env.get("INTAKE_FLOOR") else None),
             create_requests=env.get("CREATE_REQUESTS", "1") != "0",
             tag_signal_category=env.get("TAG_SIGNAL_CATEGORY", "0") == "1",
+            suppress_third_party_requests=env.get("SUPPRESS_THIRD_PARTY", "0") == "1",
             rules=Rules.load(Path(env.get("RULES_PATH", Path(__file__).parent / "rules.json"))),
         )
