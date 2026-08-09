@@ -208,12 +208,14 @@ class SyncRun:
         return True
 
     # ── category ──────────────────────────────────────────────────────────────
-    def _category_value(self, cat: str | None) -> int:
-        """Category label → option value, folding labels the target env's option
-        set doesn't have yet (writing a missing option value 400s). NDA and the
-        signal new_category column arrive together in the v3 import — until then
-        NDA folds to Legal-SideLetter. The v2 four fold to Other in envs that
-        predate the 2026-08-04 import (same probe as the v2 columns)."""
+    def _category_value(self, cat: str | None, entity: str = "inforequest") -> int:
+        """Category label → option value for `{entity}.{prefix}category`, folding
+        labels the TARGET COLUMN's option set doesn't have yet (writing a missing
+        option value 400s). `entity` is 'inforequest' (default) or
+        'engagementsignal' — the two category columns can drift if a solution
+        import lands options on one but not the other, so each write validates
+        against its own column. NDA folds to Legal-SideLetter until the v3 signal
+        column exists; the v2 four fold to Other in envs predating that import."""
         p, ch = self.cfg.prefix, self.cfg.choices
         cat = cat or "Other"
         if cat == "NDA" and not self.dv.has_attribute(f"{p}engagementsignal", f"{p}category"):
@@ -222,8 +224,8 @@ class SyncRun:
             cat = "Other"
         val = ch.req_category.get(cat, ch.req_category["Other"])
         # General net for appended options (v4+): never write an option value the
-        # target env's option set lacks — fold to Other until the import lands.
-        valid = self.dv.category_option_values(f"{p}inforequest", f"{p}category")
+        # target column's option set lacks — fold to Other until the import lands.
+        valid = self.dv.category_option_values(f"{p}{entity}", f"{p}category")
         if valid is not None and val not in valid:
             return ch.req_category["Other"]
         return val
@@ -268,7 +270,8 @@ class SyncRun:
         # target env (probe cached per run), so it never 400s in PROD pre-import.
         if self.cfg.tag_signal_category and rfi.category \
                 and self.dv.has_attribute(f"{p}engagementsignal", f"{p}category"):
-            body[f"{p}category"] = self._category_value(rfi.category)
+            body[f"{p}category"] = self._category_value(rfi.category,
+                                                        entity="engagementsignal")
         return body
 
     def _diff_for_update(self, existing, payload):

@@ -159,6 +159,19 @@ def test_v4_category_folds_to_other_before_import(cfg, tmp_path):
     assert req["new_category"] == BASE + 8             # Other
 
 
+def test_category_value_probes_per_column(cfg, tmp_path):
+    """Columns can drift (an import lands an option on the request column but not
+    the signal column). Each write must validate against its OWN column: the
+    request keeps CartaOnboarding while the signal folds to Other — no 400."""
+    dv = FakeDataverse(apply=True)
+    dv.category_option_values = lambda ent, attr: (
+        {BASE + i for i in range(16)} if ent == "new_inforequest"
+        else {BASE + i for i in range(14)})          # signal column lacks v4
+    run = make_run(cfg, tmp_path, dv)
+    assert run._category_value("CartaOnboarding") == BASE + 14                     # request
+    assert run._category_value("CartaOnboarding", entity="engagementsignal") == BASE + 8  # Other
+
+
 def _matched_inbound_msg():
     """External inbound message that resolves Confirmed to OPP1 via regarding_opp,
     so a request would be created absent any suppression."""
