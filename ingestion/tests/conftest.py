@@ -102,6 +102,9 @@ class FakeDataverse:
     def has_attribute(self, entity_logical, attr_logical):
         return True   # fake env has every provisioned column
 
+    def category_option_values(self, entity_logical, attr_logical):
+        return None   # no-op by default; tests override to exercise folding
+
     def fetch_contacts(self, ids):
         return [dict(r) for r in CONTACT_ROWS if r["contactid"] in ids]
 

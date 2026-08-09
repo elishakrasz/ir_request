@@ -220,7 +220,13 @@ class SyncRun:
             cat = "Legal-SideLetter"
         if cat in V2_ONLY_CATEGORIES and not self.dv.has_attribute(f"{p}inforequest", f"{p}thirdparty"):
             cat = "Other"
-        return ch.req_category.get(cat, ch.req_category["Other"])
+        val = ch.req_category.get(cat, ch.req_category["Other"])
+        # General net for appended options (v4+): never write an option value the
+        # target env's option set lacks — fold to Other until the import lands.
+        valid = self.dv.category_option_values(f"{p}inforequest", f"{p}category")
+        if valid is not None and val not in valid:
+            return ch.req_category["Other"]
+        return val
 
     # ── payload ──────────────────────────────────────────────────────────────
     def _payload(self, msg, cid, oppid, method, conf, status, direction,

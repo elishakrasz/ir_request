@@ -559,6 +559,15 @@ def main():
              "as new_inforequest.new_category; written for signals on the "
              "restricted ir@ route (TAG_SIGNAL_CATEGORY). Dormant where absent."))
 
+    # 11c. v4 category taxonomy (2026-08-09, operator-approved): more servicing
+    # topics we expect to see. APPEND-ONLY — indices 14/15 on all three category
+    # columns (request category, secondary category, signal category).
+    print("— v4 category taxonomy (Carta Onboarding + Brokerage Details)")
+    for i, name in enumerate(["CartaOnboarding", "BrokerageDetails"], start=14):
+        ensure_option(api, req, f"{p}category", name, value_base + i)
+        ensure_option(api, req, f"{p}secondarycategory", name, value_base + i)
+        ensure_option(api, sig, f"{p}category", name, value_base + i)
+
     # 12. ir@ intake (docs/ir-intake-design.md, operator-approved 2026-08-05):
     # marker distinguishing auto-created sender contacts from curated CRM rows.
     # The intake path stays dormant in any env where this column is absent.

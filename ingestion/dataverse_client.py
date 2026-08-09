@@ -128,6 +128,33 @@ class DataverseClient:
             cache[key] = bool(r.status_code == 200 and r.json().get("value"))
         return cache[key]
 
+    def category_option_values(self, entity_logical: str, attr_logical: str) -> set | None:
+        """Set of option VALUES for a picklist (cached per run); None if the probe
+        fails. Lets sync fold a category the target env's option set doesn't have
+        yet to a safe fallback instead of 400-ing on an unknown option value —
+        the same 'code may precede schema' pattern as has_attribute, but for
+        newly-appended options (which add no column to probe)."""
+        cache = getattr(self, "_optset_cache", None)
+        if cache is None:
+            cache = self._optset_cache = {}
+        key = (entity_logical, attr_logical)
+        if key not in cache:
+            vals = None
+            r = self._req(
+                "GET",
+                f"EntityDefinitions(LogicalName='{entity_logical}')/Attributes/"
+                "Microsoft.Dynamics.CRM.PicklistAttributeMetadata"
+                f"?$select=LogicalName&$filter=LogicalName eq '{attr_logical}'"
+                "&$expand=OptionSet($select=Options)")
+            if r.status_code == 200 and r.json().get("value"):
+                try:
+                    opts = r.json()["value"][0]["OptionSet"]["Options"]
+                    vals = {o["Value"] for o in opts}
+                except (KeyError, IndexError, TypeError):
+                    vals = None
+            cache[key] = vals
+        return cache[key]
+
     def find_contact_by_email(self, email: str) -> dict | None:
         """ANY contact holding this address — the scope map only covers
         opportunity-linked contacts, so intake reuse-before-create must ask

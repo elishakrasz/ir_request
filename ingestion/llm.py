@@ -78,6 +78,7 @@ REQUEST_CATEGORIES = [
     "Legal-SideLetter", "Meeting", "DataRoom", "Other",
     "CapitalCall", "TaxDocs", "AccountAdmin", "LiquidityTransfer",
     "NDA",  # v3 2026-08-06 (append-only)
+    "CartaOnboarding", "BrokerageDetails",  # v4 2026-08-09 (append-only)
 ]
 
 REQUEST_SYSTEM = (
@@ -105,8 +106,15 @@ REQUEST_SYSTEM = (
     "- Reporting: fund-level reports, quarterly reports, audit-support info\n"
     "- CapitalAccount: capital account statements — requests, resends, "
     "discrepancies\n"
-    "- SubscriptionDocs: subscription/onboarding support — Carta issues, "
-    "signature failures, subscription document access, account opening forms\n"
+    "- SubscriptionDocs: subscription/onboarding support — signature failures, "
+    "subscription document access/versions, account opening forms\n"
+    "- CartaOnboarding: getting onto or into the Carta platform itself — Carta "
+    "invitations, account activation/registration, login/access problems, "
+    "completing Carta onboarding steps (the platform, not the sub-doc content)\n"
+    "- BrokerageDetails: brokerage/DTC account coordinates for delivering shares "
+    "— providing or requesting a brokerage account number, DTC participant "
+    "number, or delivery instructions (the account details themselves, distinct "
+    "from the LiquidityTransfer election/decision to move shares)\n"
     "- KYC-AML: identity documents, FATCA/CRS, compliance verification\n"
     "- AccountAdmin: portal access/passwords, distribution-list changes, "
     "address/email changes, advisor access grants, ownership transfers "

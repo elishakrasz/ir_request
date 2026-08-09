@@ -131,6 +131,34 @@ def test_nda_folds_to_sideletter_before_v3_import(cfg, tmp_path):
     assert req["new_category"] == BASE + 5             # Legal-SideLetter
 
 
+def test_v4_category_writes_when_option_present(cfg, tmp_path):
+    """v4: CartaOnboarding writes its own option value once the import has landed
+    (FakeDataverse reports all options present via the None no-op probe)."""
+    dv = FakeDataverse(apply=True)
+    run = make_run(cfg, tmp_path, dv)
+    rfi = RfiResult(is_info_request=True, category="CartaOnboarding",
+                    description="Investor can't activate their Carta account")
+    msg = {"subject": "Carta login", "_ts": ts(30, 9), "_hash": "o" * 64}
+    run._create_rfi({"new_engagementsignalid": "sig-v4"}, msg, rfi, ANNA, OPP1)
+    req = next(iter(dv.requests.values()))
+    assert req["new_category"] == BASE + 14            # CartaOnboarding
+
+
+def test_v4_category_folds_to_other_before_import(cfg, tmp_path):
+    """PROD-before-import: the option set lacks v4 values → BrokerageDetails
+    folds to Other rather than writing an unknown option value (which 400s)."""
+    dv = FakeDataverse(apply=True)
+    # option set only has values 0..13 (through NDA), not the v4 additions
+    dv.category_option_values = lambda e, a: {BASE + i for i in range(14)}
+    run = make_run(cfg, tmp_path, dv)
+    rfi = RfiResult(is_info_request=True, category="BrokerageDetails",
+                    description="Please confirm the DTC number for delivery")
+    msg = {"subject": "DTC", "_ts": ts(30, 9), "_hash": "b" * 64}
+    run._create_rfi({"new_engagementsignalid": "sig-v4b"}, msg, rfi, ANNA, OPP1)
+    req = next(iter(dv.requests.values()))
+    assert req["new_category"] == BASE + 8             # Other
+
+
 def _matched_inbound_msg():
     """External inbound message that resolves Confirmed to OPP1 via regarding_opp,
     so a request would be created absent any suppression."""

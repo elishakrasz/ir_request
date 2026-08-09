@@ -66,7 +66,8 @@ class Choices:
             ["Reporting", "CapitalAccount", "Valuation", "KYC-AML", "SubscriptionDocs",
              "Legal-SideLetter", "Meeting", "DataRoom", "Other",
              "CapitalCall", "TaxDocs", "AccountAdmin", "LiquidityTransfer",
-             "NDA"])}  # v3 2026-08-06 (append-only): NDA sign/redline/countersign
+             "NDA",                                  # v3 2026-08-06 (append-only)
+             "CartaOnboarding", "BrokerageDetails"])}  # v4 2026-08-09 (append-only)
         self.urgency = {"None": base, "UrgentLanguage": base + 1,
                         "ExplicitDeadline": base + 2}   # v2 WS6 (new_statedurgency)
         # close-readiness §2.2 routing (new_routingcategory, PROD 2026-08-03+)
