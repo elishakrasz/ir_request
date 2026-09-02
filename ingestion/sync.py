@@ -32,6 +32,11 @@ URGENCY_KEY = {"none": "None", "urgent_language": "UrgentLanguage",
 # values would 400. Same probe as the v2 columns: both land in one import.
 V2_ONLY_CATEGORIES = {"CapitalCall", "TaxDocs", "AccountAdmin", "LiquidityTransfer"}
 
+# Phase-0 recommendation layer (claude_ir.md §4). Stamped into new_categoryprovenance
+# so a later reclassification on a new taxonomy/prompt version is detectable and the
+# AI suggestion is auditable. Bump when the classifier prompt or taxonomy changes.
+RECO_PROMPT_VERSION = "ir-cat-v4-2026-08-09"
+
 FOLDERS = ("inbox", "sentitems")
 
 # Stable message facts that may be corrected on re-sync. Volatile/owned-elsewhere
@@ -173,6 +178,7 @@ class SyncRun:
         self.error_samples = []
         self.touched_convs = set()
         self.new_signal_rfis = []   # (signal_id, msg, category)
+        self._ircat_map = None      # {category code: new_ircategory rowid}, lazy/cached
         self._intake_cache = {}     # sender email → contactid (per run)
 
     # ── delta state ──────────────────────────────────────────────────────────
@@ -460,6 +466,52 @@ class SyncRun:
         self._intake_cache[sender] = cid
         return cid
 
+    # ── Phase-0 recommendation layer (claude_ir.md §4) ─────────────────────────
+    def _ircategory_map(self) -> dict:
+        """{category code → new_ircategory rowid} for ACTIVE reference rows, cached
+        per run. Empty {} when the reference table is unreadable (absent in this
+        env, or PROD before its row-level privileges are granted — a 403). The
+        recommendation layer then no-ops without ever breaking request creation."""
+        if self._ircat_map is None:
+            p = self.cfg.prefix
+            try:
+                rows = self.dv.query(
+                    f"{p}ircategories?$select={p}name,{p}ircategoryid"
+                    f"&$filter={p}active eq true")
+                self._ircat_map = {r[f"{p}name"]: r[f"{p}ircategoryid"]
+                                   for r in rows if r.get(f"{p}name")}
+                say(f"reference taxonomy: {len(self._ircat_map)} active categories")
+            except Exception as e:
+                self._ircat_map = {}
+                say(f"reference taxonomy unreadable ({str(e)[:80]}) — "
+                    f"category recommendation disabled this run")
+        return self._ircat_map
+
+    def _recommendation_fields(self, rfi, msg, signal_row) -> dict:
+        """AI category written as a RECOMMENDATION against the versioned reference
+        table (new_ircategory): lookup + confidence + provenance. NEVER *actual (a
+        human promotes that). Inert where the columns/table are absent, so it is a
+        no-op in envs predating the Phase-0 import — same guard style as the v2
+        block below."""
+        p = self.cfg.prefix
+        if not rfi.category:
+            return {}
+        if not self.dv.has_attribute(f"{p}inforequest", f"{p}categoryrecommended"):
+            return {}
+        rowid = self._ircategory_map().get(rfi.category)
+        if not rowid:                      # unknown code / table unreadable → skip
+            return {}
+        prov = json.dumps(
+            {"model": llm.REQUEST_MODEL, "prompt_ver": RECO_PROMPT_VERSION,
+             "ts": msg["_ts"].strftime("%Y-%m-%dT%H:%M:%SZ"),
+             "signal_ids": [signal_row[f"{p}engagementsignalid"]]},
+            separators=(",", ":"))
+        return {
+            f"{p}categoryrecommended@odata.bind": f"/{p}ircategories({rowid})",
+            f"{p}categoryconfidence": rfi.confidence,
+            f"{p}categoryprovenance": clip(prov, 2000),
+        }
+
     def _create_rfi(self, signal_row, msg, rfi, cid, oppid):
         p, ch, cfg = self.cfg.prefix, self.cfg.choices, self.cfg
         # request title = the LLM's one-sentence description when present
@@ -499,6 +551,8 @@ class SyncRun:
             body[f"{p}classifierconfidence"] = rfi.confidence
             if rfi.secondary and rfi.secondary in ch.req_category:
                 body[f"{p}secondarycategory"] = self._category_value(rfi.secondary)
+        # Phase-0: AI category recommendation (lookup + confidence + provenance).
+        body.update(self._recommendation_fields(rfi, msg, signal_row))
         self.dv.create(f"{p}inforequests", body, f"inforequest for {msg['_hash'][:12]}…")
         self.counts["rfi_created"] += 1
 

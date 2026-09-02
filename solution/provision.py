@@ -215,6 +215,13 @@ def picklist_attr(schema, display, options, value_base, default_index=None, desc
     return a
 
 
+def autonumber_attr(schema, display, fmt="IR-{SEQNUM:00000}", maxlen=50, desc=None):
+    """String column with an auto-number format — a stable, unique human id."""
+    a = string_attr(schema, display, maxlen, desc=desc)
+    a["AutoNumberFormat"] = fmt
+    return a
+
+
 # ── idempotent ensure-helpers ─────────────────────────────────────────────────
 
 def ensure_entity(api, schema, display, plural, org_owned, primary_desc):
@@ -576,6 +583,94 @@ def main():
         f"{p}autocreatedby", "Auto-Created By", 100,
         desc="ir-intake|<runid> when this contact was auto-created from an "
              "unknown sender to an intake mailbox; empty for curated contacts"))
+
+    # 13. Phase-0 recommendation layer (claude_ir.md §4; operator-approved
+    # 2026-09-01, see docs/phase0/). AI writes *recommended / *confidence /
+    # *provenance; a human promotes to *actual (never from an automated path).
+    # Categories & routing live in versioned reference tables so the lists
+    # change without a deploy. Logical names follow the org's no-underscore
+    # convention. Reuses new_aisummarywatermark as the summary cache key.
+    cat = f"{p}ircategory"
+    rule = f"{p}irrule"
+    print("— phase-0 reference tables")
+    ensure_entity(api, cat, "IR Category", "IR Categories", org_owned=True,
+                  primary_desc="Category code (stable key), e.g. Distribution")
+    ensure_entity(api, rule, "IR Rule", "IR Rules", org_owned=True,
+                  primary_desc="Rule name")
+
+    print("— IR category columns")
+    for a in [
+        string_attr(f"{p}displayname", "Display Name", 100,
+                    desc="Friendly label, e.g. 'Distribution / Share Delivery'"),
+        memo_attr(f"{p}definition", "Definition", 2000,
+                  desc="What belongs here — classifier prompt + reviewer guidance"),
+        string_attr(f"{p}version", "Version", 20, desc="Taxonomy version, e.g. v3"),
+        bool_attr(f"{p}active", "Active", default=True,
+                  desc="Retire by setting false — never delete; historical lookups still resolve"),
+        int_attr(f"{p}sortorder", "Sort Order", minv=0),
+        picklist_attr(f"{p}defaulttier", "Default Tier", ["T1", "T2", "T3", "T4"],
+                      value_base, desc="Default draft tier (§4.4); a rule can override"),
+    ]:
+        ensure_attribute(api, cat, a)
+
+    print("— IR rule columns")
+    for a in [
+        picklist_attr(f"{p}matchtype", "Match Type",
+                      ["Category", "SenderAddress", "SenderDomain", "SubjectKeyword",
+                       "SenderType", "Handler"], value_base),
+        string_attr(f"{p}matchvalue", "Match Value", 300),
+        picklist_attr(f"{p}action", "Action",
+                      ["Route", "SetTier", "SuppressAck", "DropNoise", "ExcludeHandler"],
+                      value_base),
+        picklist_attr(f"{p}tier", "Tier", ["T1", "T2", "T3", "T4"], value_base),
+        int_attr(f"{p}priority", "Priority", minv=0, desc="Lower evaluated first"),
+        bool_attr(f"{p}active", "Active", default=True),
+        string_attr(f"{p}note", "Note", 500),
+    ]:
+        ensure_attribute(api, rule, a)
+
+    print("— phase-0 information request columns")
+    for a in [
+        int_attr(f"{p}categoryconfidence", "Category Confidence", minv=0, maxv=100),
+        memo_attr(f"{p}categoryprovenance", "Category Provenance", 2000,
+                  desc="JSON: model, prompt_ver, ts, signal_ids"),
+        string_attr(f"{p}assigneereason", "Assignee Reason", 500,
+                    desc="One-sentence why (recommender)"),
+        memo_attr(f"{p}assigneeprovenance", "Assignee Provenance", 2000),
+        picklist_attr(f"{p}statusinferred", "Status (inferred)",
+                      ["AwaitingInvestor", "AwaitingInternal", "PossiblyClosable"],
+                      value_base,
+                      desc="System-set from traffic; status_actual = new_status. Never auto-close"),
+        memo_attr(f"{p}statusprovenance", "Status Provenance", 2000),
+        autonumber_attr(f"{p}casenumber", "Case Number", fmt="IR-{SEQNUM:00000}",
+                        maxlen=50, desc="Stable, unique human-readable id (§4.3 ack)"),
+        bool_attr(f"{p}acksent", "Ack Sent", default=False),
+        datetime_attr(f"{p}acksentat", "Ack Sent At"),
+        memo_attr(f"{p}draftreply", "Draft Reply", 100000,
+                  desc="Drafted body; never a mail item until Send (§4.4)"),
+        memo_attr(f"{p}draftattachments", "Draft Attachments", 2000,
+                  desc="References/paths of attachments to re-send"),
+        picklist_attr(f"{p}drafttier", "Draft Tier", ["T1", "T2", "T3", "T4"], value_base),
+        memo_attr(f"{p}draftprovenance", "Draft Provenance", 2000),
+    ]:
+        ensure_attribute(api, req, a)
+
+    print("— phase-0 contact summary column")
+    ensure_attribute(api, "contact", memo_attr(
+        f"{p}aisummaryprovenance", "AI Summary Provenance", 2000,
+        desc="JSON provenance for the cached summary; cache key is aisummarywatermark"))
+
+    print("— phase-0 lookups")
+    ensure_lookup(api, f"{p}ircategory_inforequest_recommended", cat, req,
+                  f"{p}categoryrecommended", "Category (recommended)")
+    ensure_lookup(api, f"{p}ircategory_inforequest_actual", cat, req,
+                  f"{p}categoryactual", "Category (actual)")
+    ensure_lookup(api, f"{p}systemuser_inforequest_assigneerec", "systemuser", req,
+                  f"{p}assigneerecommended", "Assignee (recommended)")
+    ensure_lookup(api, f"{p}systemuser_ircategory_handler", "systemuser", cat,
+                  f"{p}defaulthandler", "Default Handler")
+    ensure_lookup(api, f"{p}systemuser_irrule_handler", "systemuser", rule,
+                  f"{p}handler", "Handler")
 
     n = len(api.creates)
     if args.apply:
