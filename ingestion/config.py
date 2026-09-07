@@ -73,6 +73,9 @@ class Choices:
         # close-readiness §2.2 routing (new_routingcategory, PROD 2026-08-03+)
         self.routing = {"ProcessBlocker": base, "Conviction": base + 1,
                         "DealMechanics": base + 2, "Scheduling": base + 3}
+        # §4.5 inferred status (new_statusinferred) — system-set from thread traffic.
+        self.statusinferred = {"AwaitingInvestor": base, "AwaitingInternal": base + 1,
+                               "PossiblyClosable": base + 2}
         self.rev_direction = {v: k for k, v in self.direction.items()}
         self.rev_matchmethod = {v: k for k, v in self.matchmethod.items()}
 
@@ -96,6 +99,9 @@ class Config:
     # review_min..auto_confirm_min-1 → needs_review; <review_min → noise
     auto_confirm_min: int = 85
     review_min: int = 50
+    # §4.5: days of no traffic after our last outbound before a request is flagged
+    # PossiblyClosable (never auto-closed — a human closes). Tunable.
+    status_closable_days: int = 14
     # ir@ intake (docs/ir-intake-design.md): mailboxes whose inbound mail is
     # ingested even from unknown senders (auto-created contacts). Empty = off.
     intake_mailboxes: list = field(default_factory=list)
@@ -139,6 +145,7 @@ class Config:
             fund_lookup=env.get("FUND_LOOKUP", "mint_fundorspv"),
             auto_confirm_min=int(env.get("AUTO_CONFIRM_MIN", "85")),
             review_min=int(env.get("REVIEW_MIN", "50")),
+            status_closable_days=int(env.get("STATUS_CLOSABLE_DAYS", "14")),
             rfi_due_bdays=int(env.get("RFI_DUE_BDAYS", "2")),
             rfi_reply_status=env.get("RFI_REPLY_STATUS", "WaitingExternal"),
             intake_mailboxes=[m.strip().lower() for m in

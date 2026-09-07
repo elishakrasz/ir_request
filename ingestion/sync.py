@@ -639,6 +639,53 @@ class SyncRun:
             }
         return {}
 
+    def _infer_status(self, conv_id, now=None):
+        """§4.5: (statusinferred label, provenance JSON) from the thread's traffic —
+        AwaitingInvestor (we replied last), AwaitingInternal (they replied last), or
+        PossiblyClosable (no traffic for status_closable_days after our reply).
+        (None, None) with no usable conversation. NEVER closes a request."""
+        if not conv_id:
+            return None, None
+        p, ch = self.cfg.prefix, self.cfg.choices
+        rev = ch.rev_direction
+        sigs = [s for s in self.dv.conversation_signals(conv_id)
+                if s.get(f"{p}ismeaningful") and s.get(f"{p}timestamputc")]
+
+        def last(name):
+            ts = [s[f"{p}timestamputc"] for s in sigs
+                  if rev.get(s.get(f"{p}direction")) == name]
+            return max(ts) if ts else None
+
+        last_in, last_out = last("Inbound"), last("Outbound")
+        if not last_in and not last_out:
+            return None, None
+        now = now or datetime.now(timezone.utc)
+        parse = lambda t: datetime.fromisoformat(t.replace("Z", "+00:00"))
+        if last_out and (not last_in or parse(last_out) >= parse(last_in)):
+            days = (now - parse(last_out)).days
+            if days >= self.cfg.status_closable_days:
+                label, rule = "PossiblyClosable", f"no traffic {days}d after our last reply"
+            else:
+                label, rule = "AwaitingInvestor", "we replied after their last message"
+        else:
+            label, rule = "AwaitingInternal", "they replied after our last message"
+        prov = json.dumps({"rule": rule, "last_inbound": last_in, "last_outbound": last_out,
+                           "closable_days": self.cfg.status_closable_days,
+                           "ts": now.strftime("%Y-%m-%dT%H:%M:%SZ")}, separators=(",", ":"))
+        return label, prov
+
+    def _status_fields(self, conv_id) -> dict:
+        """§4.5 write map: new_statusinferred + provenance. NEVER new_status (the
+        human's status_actual). Inert where the column is absent."""
+        p = self.cfg.prefix
+        if not self.dv.has_attribute(f"{p}inforequest", f"{p}statusinferred"):
+            return {}
+        label, prov = self._infer_status(conv_id)
+        if not label:
+            return {}
+        return {f"{p}statusinferred": self.cfg.choices.statusinferred[label],
+                f"{p}statusprovenance": clip(prov, 2000)}
+
     def _create_rfi(self, signal_row, msg, rfi, cid, oppid):
         p, ch, cfg = self.cfg.prefix, self.cfg.choices, self.cfg
         # request title = the LLM's one-sentence description when present
