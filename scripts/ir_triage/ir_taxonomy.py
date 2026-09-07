@@ -7,12 +7,12 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from ingestion.graph_client import GraphClient, GRAPH  # noqa: E402
 
 MAILBOX = "ir@exigentcap.com"
 SINCE = "2024-08-04T00:00:00Z"
-OUT = Path(__file__).parent / "reports" / "ir_inbox_raw.jsonl"
+OUT = Path(__file__).resolve().parents[2] / "reports" / "ir_inbox_raw.jsonl"
 
 SELECT = ("id,parentFolderId,subject,bodyPreview,from,toRecipients,ccRecipients,"
           "sentDateTime,receivedDateTime,conversationId,internetMessageId")
@@ -50,7 +50,7 @@ def folder_map(gc: GraphClient) -> dict:
 
 
 def main():
-    env = load_env(Path(__file__).parent / ".env")
+    env = load_env(Path(__file__).resolve().parents[2] / ".env")
     gc = GraphClient(env["TENANT_ID"], env["CLIENT_ID"], env["CLIENT_SECRET"])
 
     print("mapping folders...", flush=True)

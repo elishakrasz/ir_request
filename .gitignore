@@ -24,3 +24,6 @@ venv/
 
 # Data exports (PII) — never commit
 reports/
+
+# Scratch scripts — keep one-offs out of the tree (real tools live in scripts/)
+tmp_*.py

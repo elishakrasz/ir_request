@@ -11,12 +11,15 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from ingestion.classify import classify
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root
+from ingestion.classify import classify  # noqa: E402
 from ingestion.config import Config
 from ingestion.dataverse_client import DataverseClient
 from ingestion.sync import say
 
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "reports" / "v2_verify.tsv"
 
 

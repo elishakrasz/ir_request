@@ -10,7 +10,7 @@ from pathlib import Path
 
 import anthropic
 
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).resolve().parents[2]
 HUMAN = ROOT / "reports" / "ir_human.tsv"
 OUT = ROOT / "reports" / "ir_classified.tsv"
 CKPT = ROOT / "reports" / "ir_classified_partial.jsonl"

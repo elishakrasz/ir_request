@@ -4,10 +4,10 @@ from pathlib import Path
 
 import requests
 
-sys.path.insert(0, str(Path(__file__).parent / "solution"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "solution"))
 from provision import load_env, get_token  # noqa: E402
 
-env = load_env(Path(__file__).parent / ".env")
+env = load_env(Path(__file__).resolve().parents[1] / ".env")
 PROD = "https://exigentcrmprod.crm4.dynamics.com"
 t = {"Authorization": "Bearer " + get_token(env, PROD + "/")}
 api = PROD + "/api/data/v9.2"

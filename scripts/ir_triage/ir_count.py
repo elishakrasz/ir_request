@@ -4,7 +4,7 @@ Buckets overlap; a thread counts in every bucket it matches. Approximate by desi
 import re
 from pathlib import Path
 
-HUMAN = Path(__file__).parent / "reports" / "ir_human.tsv"
+HUMAN = Path(__file__).resolve().parents[2] / "reports" / "ir_human.tsv"
 
 BUCKETS = {
     "tax-docs (K-1 etc.)": r"\bk-?1s?\b|schedule k|tax (return|information|doc)|w-?8|w-?9|1099",

@@ -9,9 +9,9 @@ import re
 from collections import Counter
 from pathlib import Path
 
-RAW = Path(__file__).parent / "reports" / "ir_inbox_raw.jsonl"
-ADMIN = Path(__file__).parent / "reports" / "ir_admin_templates.txt"
-HUMAN = Path(__file__).parent / "reports" / "ir_human.tsv"
+RAW = Path(__file__).resolve().parents[2] / "reports" / "ir_inbox_raw.jsonl"
+ADMIN = Path(__file__).resolve().parents[2] / "reports" / "ir_admin_templates.txt"
+HUMAN = Path(__file__).resolve().parents[2] / "reports" / "ir_human.tsv"
 
 BULK_SENDERS = re.compile(
     r"@(apexgroup\.com|mail\.investors\.tzurmanagement\.com|"

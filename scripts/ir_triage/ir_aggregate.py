@@ -9,9 +9,9 @@ import re
 from collections import Counter
 from pathlib import Path
 
-RAW = Path(__file__).parent / "reports" / "ir_inbox_raw.jsonl"
-STATS = Path(__file__).parent / "reports" / "ir_inbox_stats.txt"
-THREADS = Path(__file__).parent / "reports" / "ir_inbox_threads.tsv"
+RAW = Path(__file__).resolve().parents[2] / "reports" / "ir_inbox_raw.jsonl"
+STATS = Path(__file__).resolve().parents[2] / "reports" / "ir_inbox_stats.txt"
+THREADS = Path(__file__).resolve().parents[2] / "reports" / "ir_inbox_threads.tsv"
 
 NOISE_SUBJECT = re.compile(
     r"^(automatic reply|auto(-|matic )?reply|out of office|undeliverable|"
