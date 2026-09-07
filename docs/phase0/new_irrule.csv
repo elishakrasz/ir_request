@@ -1,5 +1,6 @@
 name,matchtype,matchvalue,action,handler,tier,priority,active,note
 Exclude Michal (leaving),Handler,mravid@exigentcap.com,ExcludeHandler,,,1,true,"Michal Ravid is leaving - never recommend as assignee (recommender post-filter)"
+Exclude IR shared mailbox,Handler,ir@exigentcap.com,ExcludeHandler,,,1,true,"ir@ is a shared team mailbox, not a person - never recommend as assignee"
 Drop out-of-office,SubjectKeyword,out of office,DropNoise,,,2,true,"OOO auto-reply - no request, no category, no ack"
 Drop automatic reply,SubjectKeyword,automatic reply,DropNoise,,,2,true,"Auto-reply - dropped by the noise gate"
 Drop undeliverable,SubjectKeyword,undeliverable,DropNoise,,,2,true,"Bounce / undeliverable notice"

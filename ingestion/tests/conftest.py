@@ -178,3 +178,13 @@ class FakeDataverse:
         store = self.signals if "engagementsignal" in entity_set else self.requests
         store[row_id].update(self._serverize(payload))
         self.patched += 1
+
+
+@pytest.fixture(autouse=True)
+def _no_live_llm(monkeypatch):
+    """Belt and braces with CLASSIFIER_BACKEND=stub: unit tests never reach the
+    Anthropic API even though the project .env holds a key. A test that
+    exercises an LLM-backed path stubs the specific function itself."""
+    monkeypatch.setattr("ingestion.llm.available", lambda: False)
+    monkeypatch.setattr("ingestion.llm.draft_reply", lambda *a, **k: None,
+                        raising=False)

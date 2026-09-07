@@ -179,6 +179,9 @@ class SyncRun:
         self.touched_convs = set()
         self.new_signal_rfis = []   # (signal_id, msg, category)
         self._ircat_map = None      # {category code: new_ircategory rowid}, lazy/cached
+        self._routing = None        # (route_by_category, excluded_emails), lazy/cached
+        self._user_by_email = {}    # email -> (uid, email, name) | None  (active internal)
+        self._user_by_id = {}       # uid   -> (uid, email, name) | None  (active internal)
         self._intake_cache = {}     # sender email → contactid (per run)
 
     # ── delta state ──────────────────────────────────────────────────────────
@@ -512,6 +515,130 @@ class SyncRun:
             f"{p}categoryprovenance": clip(prov, 2000),
         }
 
+    def _routing_maps(self):
+        """(route_by_category, excluded_emails) from ACTIVE new_irrule rows, cached
+        per run. route_by_category[code] = {uid, name, email, tier, rule}; earlier
+        priority wins; a DISABLED handler (leaver) is skipped. Empty on any read failure (rules absent / PROD pre-privilege)
+        so assignee recommendation simply no-ops."""
+        if self._routing is None:
+            p = self.cfg.prefix
+            FMT = "@OData.Community.Display.V1.FormattedValue"
+            route, excl = {}, set()
+            try:
+                rows = self.dv.query(
+                    f"{p}irrules?$select={p}name,{p}matchtype,{p}matchvalue,{p}action,"
+                    f"{p}tier&$expand={p}handler($select=systemuserid,fullname,"
+                    f"internalemailaddress,isdisabled)&$filter={p}active eq true"
+                    f"&$orderby={p}priority")
+                for r in rows:
+                    mt, ac = r.get(f"{p}matchtype{FMT}"), r.get(f"{p}action{FMT}")
+                    mv = (r.get(f"{p}matchvalue") or "").strip()
+                    if ac == "ExcludeHandler" and mt == "Handler" and mv:
+                        excl.add(mv.lower())
+                    elif ac == "Route" and mt == "Category" and mv and mv not in route:
+                        h = r.get(f"{p}handler") or {}
+                        if h.get("systemuserid") and not h.get("isdisabled"):
+                            route[mv] = {"uid": h["systemuserid"],
+                                         "name": h.get("fullname") or "",
+                                         "email": (h.get("internalemailaddress") or "").lower(),
+                                         "tier": r.get(f"{p}tier{FMT}"),
+                                         "rule": r.get(f"{p}name")}
+                say(f"routing rules: {len(route)} category routes, {len(excl)} excluded")
+            except Exception as e:
+                say(f"routing rules unreadable ({str(e)[:80]}) — assignee rec disabled")
+            self._routing = (route, excl)
+        return self._routing
+
+    def _resolve_user(self, *, uid=None, email=None):
+        """(uid, email, name) for an ACTIVE internal systemuser, else None. Cached.
+        Resolve by GUID or by primary email; disabled users resolve to None."""
+        if uid:
+            if uid not in self._user_by_id:
+                rows = self.dv.query(
+                    f"systemusers?$select=systemuserid,internalemailaddress,fullname,"
+                    f"isdisabled&$filter=systemuserid eq {uid}")
+                r = rows[0] if rows else None
+                self._user_by_id[uid] = (
+                    (uid, (r.get("internalemailaddress") or "").lower(), r.get("fullname") or "")
+                    if r and not r.get("isdisabled") else None)
+            return self._user_by_id[uid]
+        email = (email or "").lower()
+        if not email:
+            return None
+        if email not in self._user_by_email:
+            rows = self.dv.query(
+                f"systemusers?$select=systemuserid,internalemailaddress,fullname"
+                f"&$filter=internalemailaddress eq '{email}' and isdisabled eq false")
+            self._user_by_email[email] = (
+                (rows[0]["systemuserid"], email, rows[0].get("fullname") or "")
+                if rows else None)
+        return self._user_by_email[email]
+
+    def _last_responder(self, cid):
+        """§4.2 #2: the internal user who most recently responded (outbound) to this
+        contact. Skips senders that aren't resolvable internal users (e.g. the shared
+        ir@ mailbox)."""
+        p, ch = self.cfg.prefix, self.cfg.choices
+        rows = self.dv.query(
+            f"{p}engagementsignals?$select={p}sender,{p}timestamputc"
+            f"&$filter=_{p}contact_value eq {cid} and {p}direction eq {ch.direction['Outbound']}"
+            f"&$orderby={p}timestamputc desc&$top=8")
+        for r in rows:
+            u = self._resolve_user(email=r.get(f"{p}sender"))
+            if u:
+                return u
+        return None
+
+    def _relationship_owner(self, cid):
+        """§4.2 #3: the contact's owner, when it is a user (not a team)."""
+        p = self.cfg.prefix
+        rows = self.dv.query(f"contacts?$select=_ownerid_value&$filter=contactid eq {cid}")
+        if rows and rows[0].get(
+                "_ownerid_value@Microsoft.Dynamics.CRM.lookuplogicalname") == "systemuser":
+            return self._resolve_user(uid=rows[0]["_ownerid_value"])
+        return None
+
+    def _assignee_fields(self, rfi, msg, cid=None) -> dict:
+        """§4.2: recommend an assignee by the weighted inputs — (1) explicit routing
+        rule, (2) last Exigent responder to the contact, (3) relationship owner —
+        taking the highest-weight non-excluded active user. Recommendation-only:
+        writes assigneerecommended (lookup) + reason + provenance, NEVER ownerid /
+        *actual (a human 'Take it' / 'Assign to' does that). Inert where absent."""
+        p = self.cfg.prefix
+        if not self.dv.has_attribute(f"{p}inforequest", f"{p}assigneerecommended"):
+            return {}
+        route, excl = self._routing_maps()
+        candidates = []                                  # (uid, email, name, source, basis)
+        hit = route.get(rfi.category) if rfi.category else None
+        if hit:
+            candidates.append((hit["uid"], hit["email"], hit["name"], "routing-rule",
+                               f"routing rule '{hit['rule']}' for category {rfi.category}"))
+        if cid:
+            for finder, source, basis in (
+                (self._last_responder, "last-responder",
+                 "most recent Exigent responder to this contact"),
+                (self._relationship_owner, "relationship-owner",
+                 "the contact's relationship owner")):
+                try:
+                    u = finder(cid)
+                except Exception:
+                    u = None
+                if u:
+                    candidates.append((u[0], u[1], u[2], source, basis))
+        for uid, email, name, source, basis in candidates:
+            if email in excl:                            # never recommend a leaving user
+                continue
+            prov = json.dumps({"source": source, "basis": basis, "category": rfi.category,
+                               "considered": [c[3] for c in candidates],
+                               "ts": msg["_ts"].strftime("%Y-%m-%dT%H:%M:%SZ")},
+                              separators=(",", ":"))
+            return {
+                f"{p}assigneerecommended@odata.bind": f"/systemusers({uid})",
+                f"{p}assigneereason": clip(f"Recommended {name or email} — {basis}.", 500),
+                f"{p}assigneeprovenance": clip(prov, 2000),
+            }
+        return {}
+
     def _create_rfi(self, signal_row, msg, rfi, cid, oppid):
         p, ch, cfg = self.cfg.prefix, self.cfg.choices, self.cfg
         # request title = the LLM's one-sentence description when present
@@ -553,6 +680,9 @@ class SyncRun:
                 body[f"{p}secondarycategory"] = self._category_value(rfi.secondary)
         # Phase-0: AI category recommendation (lookup + confidence + provenance).
         body.update(self._recommendation_fields(rfi, msg, signal_row))
+        # Phase-2 (§4.2): assignee recommendation — routing rule, else last responder
+        # / relationship owner (lookup + reason + provenance).
+        body.update(self._assignee_fields(rfi, msg, cid))
         self.dv.create(f"{p}inforequests", body, f"inforequest for {msg['_hash'][:12]}…")
         self.counts["rfi_created"] += 1
 
