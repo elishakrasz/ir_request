@@ -37,6 +37,14 @@ V2_ONLY_CATEGORIES = {"CapitalCall", "TaxDocs", "AccountAdmin", "LiquidityTransf
 # AI suggestion is auditable. Bump when the classifier prompt or taxonomy changes.
 RECO_PROMPT_VERSION = "ir-cat-v4-2026-08-09"
 
+# §4.4 draft resilience: a draft that fails at create time (LLM overload/529,
+# network blip, empty output) is retried on later ticks by _draft_retry_pass —
+# bounded per run, per request (attempts recorded in draftprovenance) and by
+# age, so a permanently un-draftable request never becomes a standing LLM cost.
+DRAFT_MAX_ATTEMPTS = 3
+DRAFT_RETRY_PER_RUN = 10
+DRAFT_RETRY_MAX_AGE_DAYS = 14
+
 FOLDERS = ("inbox", "sentitems")
 
 # Stable message facts that may be corrected on re-sync. Volatile/owned-elsewhere
@@ -69,6 +77,18 @@ def parse_ts(s: str) -> datetime:
     as bare dates — treat them as UTC midnight, or comparisons explode."""
     dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def draft_attempts(provenance: str | None) -> int:
+    """Attempts so far recorded by a FAILED draft ({"draft":"pending",...});
+    0 for a real draft's provenance, empty, or unparseable."""
+    if not provenance:
+        return 0
+    try:
+        d = json.loads(provenance)
+    except ValueError:
+        return 0
+    return int(d.get("attempts", 0)) if d.get("draft") == "pending" else 0
 
 
 def sane_deadline(deadline_iso: str | None, received: datetime) -> str | None:
@@ -678,10 +698,12 @@ class SyncRun:
                 return snips
         return []
 
-    def _draft_fields(self, rfi, msg, cid, tier) -> dict:
+    def _draft_fields(self, rfi, msg, cid, tier, attempts=0) -> dict:
         """§4.4: for T3/T4 requests, generate and STORE a draft reply — NEVER sent —
         built from the request + prior correspondence to this contact. T1/T2 get no
-        draft. Inert without the column or an API key (leaves the request draftless)."""
+        draft. Inert without the column or an API key (leaves the request draftless).
+        A failed/declined call records a pending marker (attempts+1) in
+        draftprovenance so _draft_retry_pass can try again, bounded."""
         p = self.cfg.prefix
         if tier not in ("T3", "T4"):
             return {}
@@ -692,7 +714,12 @@ class SyncRun:
         text = llm.draft_reply(msg.get("subject") or "", rfi.description or "",
                                prior, exemplars)
         if not text:
-            return {}
+            pend = json.dumps({"draft": "pending", "attempts": attempts + 1,
+                               "tier": tier,
+                               "ts": datetime.now(timezone.utc)
+                               .strftime("%Y-%m-%dT%H:%M:%SZ")},
+                              separators=(",", ":"))
+            return {f"{p}draftprovenance": clip(pend, 2000)}
         prov = json.dumps({"model": llm.REQUEST_MODEL, "prompt_ver": RECO_PROMPT_VERSION,
                            "tier": tier, "source_signals": sig_ids,
                            "exemplars": len(exemplars),
@@ -700,6 +727,58 @@ class SyncRun:
                           separators=(",", ":"))
         return {f"{p}draftreply": clip(text, 100000),
                 f"{p}draftprovenance": clip(prov, 2000)}
+
+    def _draft_retry_pass(self, limit=DRAFT_RETRY_PER_RUN):
+        """§4.4 resilience (apply only, request route only): re-draft open T3/T4
+        requests that still have no draft — received within DRAFT_RETRY_MAX_AGE_DAYS,
+        fewer than DRAFT_MAX_ATTEMPTS tries so far — at most `limit` per run.
+        Inert without the column or an API key. Never re-drafts an existing one."""
+        p, ch = self.cfg.prefix, self.cfg.choices
+        if not (self.apply and self.cfg.create_requests):
+            return
+        if not (self.dv.has_attribute(f"{p}inforequest", f"{p}draftreply")
+                and llm.available()):
+            return
+        st = ch.req_status
+        since = (datetime.now(timezone.utc) - timedelta(days=DRAFT_RETRY_MAX_AGE_DAYS)
+                 ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        tiers = " or ".join(f"{p}drafttier eq {ch.drafttier[t]}" for t in ("T3", "T4"))
+        try:
+            rows = self.dv.query(
+                f"{p}inforequests?$select={p}inforequestid,{p}name,{p}category,"
+                f"{p}receiveddate,{p}drafttier,{p}draftprovenance,_{p}contact_value"
+                f"&$filter={p}draftreply eq null and ({tiers})"
+                f" and {p}status ne {st['Completed']} and {p}status ne {st['Cancelled']}"
+                f" and {p}receiveddate ge {since}"
+                f"&$orderby={p}receiveddate desc&$top={limit}")
+        except Exception as e:
+            say(f"draft retry: query failed ({str(e)[:80]}) — skipped")
+            return
+        rev_tier = {v: k for k, v in ch.drafttier.items()}
+        val2code = {v: k for k, v in ch.req_category.items()}
+        for r in rows:
+            attempts = draft_attempts(r.get(f"{p}draftprovenance"))
+            if attempts >= DRAFT_MAX_ATTEMPTS:
+                continue
+            rid = r[f"{p}inforequestid"]
+            tier = rev_tier.get(r.get(f"{p}drafttier"), "T3")
+            rfi = RfiResult(is_info_request=True,
+                            category=val2code.get(r.get(f"{p}category")),
+                            description=r.get(f"{p}name") or "")
+            ts = (parse_ts(r[f"{p}receiveddate"]) if r.get(f"{p}receiveddate")
+                  else datetime.now(timezone.utc))
+            body = self._draft_fields(rfi, {"subject": rfi.description, "_ts": ts},
+                                      r.get(f"_{p}contact_value"), tier,
+                                      attempts=attempts)
+            if not body:
+                continue
+            self.dv.patch(f"{p}inforequests", rid, body, f"draft retry {rid[:8]}")
+            key = "draft_retried" if f"{p}draftreply" in body else "draft_retry_failed"
+            self.counts[key] = self.counts.get(key, 0) + 1
+        if rows:
+            say(f"draft retry: {len(rows)} candidates, "
+                f"{self.counts.get('draft_retried', 0)} drafted, "
+                f"{self.counts.get('draft_retry_failed', 0)} failed again")
 
     def _infer_status(self, conv_id, now=None):
         """§4.5: (statusinferred label, provenance JSON) from the thread's traffic —
@@ -969,6 +1048,10 @@ class SyncRun:
                 f"{c.get('errors', 0)} errors); "
                 f"latency pass over {len(self.touched_convs)} conversations")
             self._latency_and_answered_pass()
+            try:
+                self._draft_retry_pass()
+            except Exception as e:      # a retry must never break the run
+                say(f"draft retry pass failed: {str(e)[:120]}")
             if c.get("errors"):
                 # skipped messages would be lost forever if tokens advance —
                 # leave them unsaved so the next (idempotent) run retries all

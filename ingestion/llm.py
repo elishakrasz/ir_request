@@ -378,7 +378,7 @@ def draft_reply(subject: str, summary: str, prior: list[str],
                      "cache_control": {"type": "ephemeral"}}],
             messages=[{"role": "user", "content": prompt[:6000]}],
         )
-    except anthropic.APIStatusError as e:
+    except anthropic.APIError as e:          # status AND connection errors
         log(f"[llm] draft call failed ({type(e).__name__}) — skipped")
         return None
     if resp.stop_reason == "refusal":

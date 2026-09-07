@@ -5,10 +5,13 @@ recommender (SyncRun) so backfilled values match what new requests get:
   - assigneerecommended + reason + provenance   (routing rule → responder → owner)
   - drafttier                                    (routing rule tier, T1 default)
   - draftreply + provenance   (T3/T4 only)       (LLM from the request + history)
+  - statusinferred + provenance                  (recomputed on every pass)
 
 NOT touched: category (the classifier's original stays), ownerid / any *actual, and
 casenumber (a system autonumber). Idempotent: a request that already has an assignee
-recommendation is skipped unless --force.
+recommendation is skipped unless --force — except a T3/T4 request whose draft failed
+(LLM overload at create time), which is re-drafted with the same attempt bound the
+sync's retry pass uses.
 
     venv/bin/python docs/phase0/backfill_recommendations.py            # dry run
     venv/bin/python docs/phase0/backfill_recommendations.py --apply --limit 8
@@ -26,7 +29,7 @@ sys.path.insert(0, str(HERE.parent.parent))
 from ingestion.config import Config, load_env
 from ingestion.dataverse_client import DataverseClient
 from ingestion.classify import RfiResult
-from ingestion.sync import SyncRun
+from ingestion.sync import DRAFT_MAX_ATTEMPTS, SyncRun, draft_attempts
 
 
 def main():
@@ -43,6 +46,7 @@ def main():
                          cfg.client_secret, cfg.prefix, apply=args.apply)
     run = SyncRun(cfg, graph=None, dv=dv, apply=args.apply)
     val2code = {v: k for k, v in cfg.choices.req_category.items()}
+    rev_tier = {v: k for k, v in cfg.choices.drafttier.items()}
     print(f"{'APPLY (writing)' if args.apply else 'DRY RUN'} → {cfg.dataverse_url}  "
           f"(most-recent {args.limit})")
 
@@ -53,7 +57,8 @@ def main():
            f"&$filter={p}status ne {st['Completed']} and {p}status ne {st['Cancelled']}")
     rows = dv.query(
         f"{p}inforequests?$select={p}inforequestid,{p}name,{p}category,{p}receiveddate,"
-        f"_{p}contact_value,_{p}assigneerecommended_value"
+        f"_{p}contact_value,_{p}assigneerecommended_value,{p}drafttier,{p}draftreply,"
+        f"{p}draftprovenance"
         f"&$expand={p}sourcesignal($select={p}conversationid)"
         f"{flt}&$orderby=createdon desc&$top={args.limit}")
     done = skipped = 0
@@ -63,21 +68,31 @@ def main():
         # §4.5 status inference — computed on every pass (traffic changes over time)
         conv = (r.get(f"{p}sourcesignal") or {}).get(f"{p}conversationid")
         body.update(run._status_fields(conv))
-        # recommendations + draft — only when missing (unless --force)
+        # inputs the recommender / drafter need, rebuilt from the request row
+        code = val2code.get(r.get(f"{p}category"))
+        cid = r.get(f"_{p}contact_value")
+        ts_raw = r.get(f"{p}receiveddate")
+        ts = (datetime.fromisoformat(ts_raw.replace("Z", "+00:00")) if ts_raw
+              else datetime(2026, 1, 1, tzinfo=timezone.utc))
+        rfi = RfiResult(is_info_request=True, category=code, confidence=80,
+                        description=r.get(f"{p}name") or "")
+        msg = {"subject": r.get(f"{p}name") or "", "_ts": ts}
+        tier = ((run._routing_maps()[0].get(code) or {}).get("tier")) or "T1"
         if not r.get(f"_{p}assigneerecommended_value") or args.force:
-            code = val2code.get(r.get(f"{p}category"))
-            cid = r.get(f"_{p}contact_value")
-            ts_raw = r.get(f"{p}receiveddate")
-            ts = (datetime.fromisoformat(ts_raw.replace("Z", "+00:00")) if ts_raw
-                  else datetime(2026, 1, 1, tzinfo=timezone.utc))
-            rfi = RfiResult(is_info_request=True, category=code, confidence=80,
-                            description=r.get(f"{p}name") or "")
-            msg = {"subject": r.get(f"{p}name") or "", "_ts": ts}
-            tier = ((run._routing_maps()[0].get(code) or {}).get("tier")) or "T1"
+            # recommendations + draft — only when missing (unless --force)
             if tier in cfg.choices.drafttier:
                 body[f"{p}drafttier"] = cfg.choices.drafttier[tier]
             body.update(run._assignee_fields(rfi, msg, cid))
             body.update(run._draft_fields(rfi, msg, cid, tier))
+        elif rev_tier.get(r.get(f"{p}drafttier")) in ("T3", "T4") \
+                and not r.get(f"{p}draftreply"):
+            # already recommended, but the draft failed at create time — retry,
+            # bounded exactly like sync._draft_retry_pass
+            attempts = draft_attempts(r.get(f"{p}draftprovenance"))
+            if attempts < DRAFT_MAX_ATTEMPTS:
+                body.update(run._draft_fields(rfi, msg, cid,
+                                              rev_tier[r[f"{p}drafttier"]],
+                                              attempts=attempts))
         if not body:
             skipped += 1
             continue
