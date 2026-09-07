@@ -322,6 +322,75 @@ def classify_closed_lost(subject: str, snippet: str, log=print) -> dict | None:
                         f"Subject: {subject}\n\n{snippet}", "lost:", log)
 
 
+# §4.4 draft-reply writer. Guardrailed: facts only from context, no commitments,
+# no fabricated specifics, body only (the mailer adds the signature). Never sent
+# from here — the draft is stored for a human to edit/approve/send.
+DRAFT_SYSTEM = (
+    "You draft a reply for a private-equity investor-relations team to send to an "
+    "investor. Write a professional, warm, concise reply body that addresses the "
+    "investor's request. STRICT RULES:\n"
+    "- Use ONLY facts present in the provided request and prior correspondence. Do "
+    "NOT invent specifics (dates, amounts, document names, timelines).\n"
+    "- Only reference something as 'previously shared/sent' if the prior "
+    "correspondence clearly shows it was. Never imply the investor was told "
+    "something they were not.\n"
+    "- Make no commitments, guarantees of timing, or legal/tax statements.\n"
+    "- When reference replies from the team are provided, MATCH their tone and "
+    "structure (the house voice) and reuse accurate, general content patterns. But "
+    "treat them as STYLE ONLY — NEVER copy another investor's specific names, "
+    "figures, dates, holdings, or commitments into this reply.\n"
+    "- If you lack the information to answer, write a brief holding reply that "
+    "acknowledges the request and says a team member will follow up with specifics.\n"
+    "- Output the reply BODY only — no subject line, no signature block, no "
+    "placeholders in brackets. Keep it under ~180 words."
+)
+
+
+def draft_reply(subject: str, summary: str, prior: list[str],
+                exemplars: list[str] | None = None, log=print) -> str | None:
+    """§4.4 (T3/T4): draft a reply body from the request + prior correspondence to
+    this contact, plus optional cross-investor exemplars (how the team has answered
+    similar requests) used for TONE + content patterns only. Plain text; NEVER sent.
+    Cached by request + context. None when no API key (caller stores no draft)."""
+    if not available():
+        return None
+    prior_block = "\n\n".join(f"- {(s or '')[:600]}" for s in (prior or [])[:6]) \
+        or "(no prior correspondence to this contact on file)"
+    ex = [s for s in (exemplars or []) if s][:6]
+    ex_block = "\n\n".join(f"- {s[:500]}" for s in ex)
+    ex_section = (
+        "\nHow the team has answered similar requests — STYLE + CONTENT reference "
+        "ONLY (match the tone; do NOT copy any specific names, figures, dates, or "
+        f"commitments from these):\n{ex_block}\n" if ex_block else "")
+    prompt = (f"Investor request:\nSubject: {subject}\nSummary: {summary}\n\n"
+              f"Prior correspondence to this contact (most recent first):\n"
+              f"{prior_block}\n{ex_section}\nDraft the reply body only.")
+    cache = _load_cache()
+    ck = "draft:" + cache_key(subject, (summary + prior_block + ex_block)[:600])
+    if ck in cache:
+        return cache[ck]
+    import anthropic
+    client = anthropic.Anthropic(api_key=_api_key(), max_retries=4)
+    try:
+        resp = client.messages.create(
+            model=REQUEST_MODEL, max_tokens=900,
+            system=[{"type": "text", "text": DRAFT_SYSTEM,
+                     "cache_control": {"type": "ephemeral"}}],
+            messages=[{"role": "user", "content": prompt[:6000]}],
+        )
+    except anthropic.APIStatusError as e:
+        log(f"[llm] draft call failed ({type(e).__name__}) — skipped")
+        return None
+    if resp.stop_reason == "refusal":
+        return None
+    text = "".join(b.text for b in resp.content if b.type == "text").strip()
+    if not text:
+        return None
+    cache[ck] = text
+    _save_cache(cache)
+    return text
+
+
 def cache_key(sender: str, subject: str) -> str:
     return hashlib.sha256(f"{sender.lower()}|{subject.lower()}".encode()).hexdigest()[:32]
 

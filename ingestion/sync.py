@@ -639,6 +639,68 @@ class SyncRun:
             }
         return {}
 
+    def _prior_outbound(self, cid):
+        """Recent MEANINGFUL outbound snippets to this contact (draft context) and
+        the signal ids used. ([], []) when there is no contact or history."""
+        if not cid:
+            return [], []
+        p, ch = self.cfg.prefix, self.cfg.choices
+        rows = self.dv.query(
+            f"{p}engagementsignals?$select={p}snippet,{p}engagementsignalid"
+            f"&$filter=_{p}contact_value eq {cid} and {p}direction eq "
+            f"{ch.direction['Outbound']} and {p}ismeaningful eq true"
+            f"&$orderby={p}timestamputc desc&$top=6")
+        snips = [r[f"{p}snippet"] for r in rows if r.get(f"{p}snippet")]
+        return snips, [r[f"{p}engagementsignalid"] for r in rows]
+
+    def _category_exemplars(self, category, exclude_cid, limit=5):
+        """Recent meaningful OUTBOUND snippets from OTHER contacts — how the team
+        writes, as a tone + content reference for the draft (never copied verbatim).
+        Prefers same-category replies (content) when outbound signals carry a
+        category; otherwise falls back to recent outbound (the house voice), which
+        is always available. [] on error or no outbound history."""
+        p, ch = self.cfg.prefix, self.cfg.choices
+        base = f"{p}direction eq {ch.direction['Outbound']} and {p}ismeaningful eq true"
+        if exclude_cid:
+            base += f" and _{p}contact_value ne {exclude_cid}"
+        catval = ch.req_category.get(category) if category else None
+        filters = ([f"{base} and {p}category eq {catval}"] if catval is not None else [])
+        filters.append(base)                       # fallback: house voice, any topic
+        for flt in filters:
+            try:
+                rows = self.dv.query(
+                    f"{p}engagementsignals?$select={p}snippet&$filter={flt}"
+                    f"&$orderby={p}timestamputc desc&$top={limit}")
+            except Exception:
+                rows = []
+            snips = [r[f"{p}snippet"] for r in rows if r.get(f"{p}snippet")]
+            if snips:
+                return snips
+        return []
+
+    def _draft_fields(self, rfi, msg, cid, tier) -> dict:
+        """§4.4: for T3/T4 requests, generate and STORE a draft reply — NEVER sent —
+        built from the request + prior correspondence to this contact. T1/T2 get no
+        draft. Inert without the column or an API key (leaves the request draftless)."""
+        p = self.cfg.prefix
+        if tier not in ("T3", "T4"):
+            return {}
+        if not self.dv.has_attribute(f"{p}inforequest", f"{p}draftreply"):
+            return {}
+        prior, sig_ids = self._prior_outbound(cid)
+        exemplars = self._category_exemplars(rfi.category, cid)
+        text = llm.draft_reply(msg.get("subject") or "", rfi.description or "",
+                               prior, exemplars)
+        if not text:
+            return {}
+        prov = json.dumps({"model": llm.REQUEST_MODEL, "prompt_ver": RECO_PROMPT_VERSION,
+                           "tier": tier, "source_signals": sig_ids,
+                           "exemplars": len(exemplars),
+                           "ts": msg["_ts"].strftime("%Y-%m-%dT%H:%M:%SZ")},
+                          separators=(",", ":"))
+        return {f"{p}draftreply": clip(text, 100000),
+                f"{p}draftprovenance": clip(prov, 2000)}
+
     def _infer_status(self, conv_id, now=None):
         """§4.5: (statusinferred label, provenance JSON) from the thread's traffic —
         AwaitingInvestor (we replied last), AwaitingInternal (they replied last), or
@@ -730,6 +792,14 @@ class SyncRun:
         # Phase-2 (§4.2): assignee recommendation — routing rule, else last responder
         # / relationship owner (lookup + reason + provenance).
         body.update(self._assignee_fields(rfi, msg, cid))
+        # Phase-3 (§4.4): draft tier from the routing rule (T1 = ack-only default for
+        # unrouted), and for T3/T4 a STORED draft reply (never sent). The case number
+        # auto-populates.
+        if self.dv.has_attribute(f"{p}inforequest", f"{p}drafttier"):
+            tier = ((self._routing_maps()[0].get(rfi.category) or {}).get("tier")) or "T1"
+            if tier in ch.drafttier:
+                body[f"{p}drafttier"] = ch.drafttier[tier]
+            body.update(self._draft_fields(rfi, msg, cid, tier))
         self.dv.create(f"{p}inforequests", body, f"inforequest for {msg['_hash'][:12]}…")
         self.counts["rfi_created"] += 1
 

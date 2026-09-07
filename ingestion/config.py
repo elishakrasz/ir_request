@@ -73,6 +73,9 @@ class Choices:
         # close-readiness §2.2 routing (new_routingcategory, PROD 2026-08-03+)
         self.routing = {"ProcessBlocker": base, "Conviction": base + 1,
                         "DealMechanics": base + 2, "Scheduling": base + 3}
+        # §4.4 draft tiers (new_drafttier); same T1-T4 order as the reference-table
+        # tiers, so a routing rule's tier maps straight through.
+        self.drafttier = {"T1": base, "T2": base + 1, "T3": base + 2, "T4": base + 3}
         # §4.5 inferred status (new_statusinferred) — system-set from thread traffic.
         self.statusinferred = {"AwaitingInvestor": base, "AwaitingInternal": base + 1,
                                "PossiblyClosable": base + 2}
