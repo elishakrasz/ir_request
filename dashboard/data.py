@@ -13,10 +13,14 @@ import pandas as pd
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
-from ingestion.config import Config           # noqa: E402
+from ingestion.config import Config, STATE_DIR  # noqa: E402
 from ingestion.dataverse_client import DataverseClient  # noqa: E402
 
 FMT = "@OData.Community.Display.V1.FormattedValue"
+
+# Run logs written by the two ingestion routes (cron runs on this host).
+RUN_DIRS = {"engagement sync": STATE_DIR / "runs",
+            "IR-request": STATE_DIR / "ir_request" / "runs"}
 
 
 def get_cfg() -> Config:
@@ -26,6 +30,22 @@ def get_cfg() -> Config:
 def get_client(cfg: Config) -> DataverseClient:
     return DataverseClient(cfg.dataverse_url, cfg.tenant_id, cfg.client_id,
                            cfg.client_secret, cfg.prefix, apply=True)
+
+
+def last_ingestion_runs() -> dict:
+    """Newest run per ingestion route, parsed from the run-id filenames
+    (already UTC). Freshness of the DATA, as opposed to freshness of the
+    dashboard's cache. A missing state dir just omits that route."""
+    out = {}
+    for label, d in RUN_DIRS.items():
+        try:
+            names = sorted(p.name for p in d.glob("*.json"))
+        except OSError:
+            continue
+        if names:
+            out[label] = pd.to_datetime(names[-1][:16], utc=True,
+                                        format="%Y%m%dT%H%M%SZ")
+    return out
 
 
 def rev(d: dict) -> dict:
@@ -124,7 +144,8 @@ def fetch_scope(dv: DataverseClient, cfg: Config):
     contacts = pd.DataFrame([{
         "contact_id": c["contactid"],
         "contact": c.get("fullname") or "(no name)",
-        "email": c.get("emailaddress1") or "",
+        "email": next((c[f] for f in ("emailaddress1", "emailaddress2",
+                                      "emailaddress3") if c.get(f)), ""),
     } for c in contact_rows])
     return opps, contacts, link_df
 

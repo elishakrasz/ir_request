@@ -6,7 +6,7 @@ Writes: ONLY the two audited confirm-click actions (review queue, RFI status),
 each stamped with the operator's name (modifiedbyhint).
 """
 import sys
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -39,7 +39,27 @@ def load_all():
     sigs = data.fetch_signals(dv, cfg)
     reqs = data.fetch_requests(dv, cfg)
     opps, contacts, links = data.fetch_scope(dv, cfg)
-    return sigs, reqs, opps, contacts, links
+    return sigs, reqs, opps, contacts, links, pd.Timestamp.now(tz="UTC")
+
+
+LOCAL_TZ = datetime.now().astimezone().tzinfo
+STALE_MIN = 45          # cron is every 15 min; >2 missed ticks is worth saying
+
+
+def freshness(ts, now):
+    """'10:45 (2 min ago)' in the viewer's local time; ts is UTC."""
+    if ts is None or pd.isna(ts):
+        return "—", None
+    mins = int((now - ts).total_seconds() // 60)
+    if mins < 1:
+        rel = "just now"
+    elif mins < 60:
+        rel = f"{mins} min ago"
+    elif mins < 1440:
+        rel = f"{mins // 60} h ago"
+    else:
+        rel = f"{mins // 1440} d ago"
+    return f"{ts.tz_convert(LOCAL_TZ):%H:%M} ({rel})", mins
 
 
 def plot_layout(fig, height=260):
@@ -130,7 +150,7 @@ def weekly_activity(sigs: pd.DataFrame):
 
 # ── load + sidebar ────────────────────────────────────────────────────────────
 cfg, dv = clients()
-sigs, reqs, opps, contacts, links = load_all()
+sigs, reqs, opps, contacts, links, loaded_at = load_all()
 now = pd.Timestamp.now(tz="UTC")
 
 st.sidebar.title("📬 Investor Engagement")
@@ -147,6 +167,16 @@ d1, d2 = st.sidebar.date_input(
 if st.sidebar.button("↻ Refresh data"):
     load_all.clear()
     st.rerun()
+
+# Two different clocks: when this view pulled from Dataverse, and when the
+# ingestion last ran. A fresh cache over a stalled sync is still stale data.
+st.sidebar.caption(f"Loaded {freshness(loaded_at, now)[0]} · 5-min cache")
+for label, ts in data.last_ingestion_runs().items():
+    text, mins = freshness(ts, now)
+    if mins is not None and mins > STALE_MIN:
+        st.sidebar.warning(f"⚠️ {label} last ran {text}")
+    else:
+        st.sidebar.caption(f"{label} ran {text}")
 
 fund_opps = opps if fund == "All funds" else opps[opps["fund"] == fund]
 fund_links = links[links["opp_id"].isin(fund_opps["opp_id"])]
