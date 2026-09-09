@@ -86,8 +86,14 @@ def main():
     email_of = {}
     for i in range(0, len(cids), 20):
         flt = " or ".join(f"contactid eq {c}" for c in cids[i:i + 20])
-        for c in dv.query(f"contacts?$select=contactid,emailaddress1&$filter={flt}"):
-            email_of[c["contactid"]] = (c.get("emailaddress1") or "").lower()
+        for c in dv.query(f"contacts?$select=contactid,emailaddress1,"
+                          f"emailaddress2,emailaddress3&$filter={flt}"):
+            # all three count: a contact reached on their 2nd/3rd address is
+            # just as much the sender (scope map indexes all three too)
+            email_of[c["contactid"]] = [
+                (c.get(f) or "").strip().lower()
+                for f in ("emailaddress1", "emailaddress2", "emailaddress3")
+                if (c.get(f) or "").strip()]
 
     groups = defaultdict(list)
     for s in sigs:
@@ -100,8 +106,8 @@ def main():
         def pref(s):
             cid = s.get(f"_{p}contact_value") or ""
             sender = (s.get(f"{p}sender") or "").lower()
-            em = email_of.get(cid, "")
-            return (0 if em and em in sender else 1, cid)
+            ems = email_of.get(cid) or []
+            return (0 if any(e in sender for e in ems) else 1, cid)
         rows.sort(key=pref)
         for i, s in enumerate(rows):
             stored = s.get(f"{p}isprimary")          # None = unset = primary

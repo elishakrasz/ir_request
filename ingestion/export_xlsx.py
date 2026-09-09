@@ -133,7 +133,8 @@ def scope_frames(dv: DataverseClient, cfg: Config):
 
     contact_df = pd.DataFrame([{
         "Contact": c.get("fullname") or "(no name)",
-        "Email": c.get("emailaddress1") or c.get("emailaddress2") or "",
+        "Email": next((c[f] for f in ("emailaddress1", "emailaddress2",
+                                      "emailaddress3") if c.get(f)), ""),
         "AI summary": c.get(f"{p}aisummary") or "",
         "AI summary at": c.get(f"{p}aisummaryat"),
         "Contact id": c["contactid"],

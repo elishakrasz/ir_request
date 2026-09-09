@@ -66,6 +66,31 @@ def test_contact_email_match_case_insensitive_and_plus_unmatched():
 def test_internal_participants_never_match():
     email_map = {"ir@exigentcap.com": ("cX", {"opp-1"})}   # misconfigured contact
     assert match_contacts(["ir@exigentcap.com"], email_map, ORG) == {}
+def test_all_three_email_addresses_are_valid():
+    """Contacts reached on their 2nd/3rd address must match — 127 of the 719
+    addresses in the live scope map come from emailaddress2/3 (e.g. Phil Rosen
+    writing from jprosen@aol.com while philip.rosen@weil.com is on file)."""
+    from ingestion.sync import build_scope
+    _, email_map = build_scope([], [], [{
+        "contactid": "c1", "fullname": "Phil Rosen",
+        "emailaddress1": "jprosen@aol.com",
+        "emailaddress2": "Philip.Rosen@Weil.com",     # mixed case on purpose
+        "emailaddress3": "  prosen@family.example  ",  # padded on purpose
+    }])
+    assert set(email_map) == {"jprosen@aol.com", "philip.rosen@weil.com",
+                              "prosen@family.example"}
+    for addr in email_map:
+        assert match_contacts([addr], email_map, ORG) == {"c1": set()}
+
+
+def test_blank_secondary_addresses_are_not_indexed():
+    from ingestion.sync import build_scope
+    _, email_map = build_scope([], [], [{
+        "contactid": "c2", "fullname": "One Address",
+        "emailaddress1": "solo@lpfund.com",
+        "emailaddress2": "", "emailaddress3": None,
+    }])
+    assert set(email_map) == {"solo@lpfund.com"}
 
 
 def test_dateonly_monitoringstartdate_regression():
