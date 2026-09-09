@@ -398,12 +398,20 @@ class SyncRun:
                 else:                       # < review_min → noise (spec 1.3)
                     status, noise_reason = "Excluded", "low_confidence"
                     oppid, method = (oppid, None)  # keep top candidate for audit
-                if msg.get("_intake") and noise_reason == "low_confidence":
-                    # intake-mailbox mail must reach the review queue, never
-                    # low-confidence noise (docs/ir-intake-design.md) — the
-                    # whole point is visibility of servicing traffic
+                # Rescues from low-confidence noise, both to the review queue:
+                #  1. intake-mailbox mail (docs/ir-intake-design.md) — the whole
+                #     point is visibility of servicing traffic;
+                #  2. inbound mail from a known contact that the classifier read
+                #     as a request. A weak OPPORTUNITY match must never bury a
+                #     real REQUEST — they are different questions, and the ask is
+                #     actionable whichever deal it turns out to belong to.
+                if noise_reason == "low_confidence" and (
+                        msg.get("_intake")
+                        or (rfi.is_info_request and direction == "Inbound")):
                     status = "Suggested" if oppid else "Unmatched"
                     noise_reason = None
+                    if not msg.get("_intake"):
+                        c["rfi_rescued"] = c.get("rfi_rescued", 0) + 1
             c.setdefault("by_status", {}).setdefault(status, 0)
             c["by_status"][status] += 1
             c.setdefault("by_method", {}).setdefault(method or "none", 0)
