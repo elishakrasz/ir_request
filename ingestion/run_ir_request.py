@@ -38,6 +38,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--months", type=int, default=3)
+    ap.add_argument("--days", type=int, default=None,
+                    help="ingest floor in DAYS, overriding --months. For bounded "
+                         "re-walks: archive the delta tokens, then re-read with a "
+                         "tight floor so only that window is processed (older "
+                         "messages are dropped in _prep, before any enrichment "
+                         "or classifier cost).")
     args = ap.parse_args()
 
     env = load_env()
@@ -45,7 +51,8 @@ def main():
     mailboxes = [m.strip().lower() for m in
                  env.get("REQUEST_MAILBOXES", DEFAULT_MAILBOXES).split(",")
                  if m.strip()]
-    floor = datetime.now(timezone.utc) - timedelta(days=30 * args.months)
+    span = timedelta(days=args.days) if args.days is not None         else timedelta(days=30 * args.months)
+    floor = datetime.now(timezone.utc) - span
 
     cfg = dataclasses.replace(
         base,
@@ -69,7 +76,7 @@ def main():
                          base.client_secret, base.prefix, apply=args.apply)
 
     say(f"IR-request route · mailboxes={mailboxes} · floor={floor:%Y-%m-%d} "
-        f"({args.months}mo) · graph app={'RESTRICTED' if restricted else 'MAIN (dry-run validation)'} "
+        f"({str(args.days) + 'd' if args.days is not None else str(args.months) + 'mo'}) · graph app={'RESTRICTED' if restricted else 'MAIN (dry-run validation)'} "
         f"· intake=off (CRM-only) · create_requests=on")
     if not restricted and args.apply:
         raise SystemExit("Refusing --apply on the MAIN app: set REQUEST_CLIENT_ID "
