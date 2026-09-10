@@ -205,13 +205,24 @@ class DataverseClient:
             f"{p}ismeaningful,{p}matchstatus,_{p}contact_value"
             f"&$filter={p}conversationid eq '{conv_id}'")
 
+    def open_requests_in_conversation(self, conv_id: str,
+                                      open_values: list[int]) -> list[dict]:
+        """Open requests whose source signal sits on this thread. The merge gate
+        asks the classifier whether a new email belongs to one of these rather
+        than opening its own ticket."""
+        p = self.p
+        sigs = self.conversation_signals(conv_id)
+        ids = [s[f"{p}engagementsignalid"] for s in sigs]
+        return self.requests_for_signals(ids, open_values) if ids else []
+
     def requests_for_signals(self, signal_ids: list[str], open_values: list[int]) -> list[dict]:
         p, rows = self.p, []
         for i in range(0, len(signal_ids), 20):
             flt = " or ".join(f"_{p}sourcesignal_value eq {s}" for s in signal_ids[i:i + 20])
             status_flt = " or ".join(f"{p}status eq {v}" for v in open_values)
             rows.extend(self.query(
-                f"{p}inforequests?$select={p}inforequestid,{p}status,"
+                f"{p}inforequests?$select={p}inforequestid,{p}status,{p}name,"
+                f"{p}category,{p}receiveddate,"
                 f"_{p}sourcesignal_value&$filter=({flt}) and ({status_flt})"))
         return rows
 

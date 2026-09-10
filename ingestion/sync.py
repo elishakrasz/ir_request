@@ -478,7 +478,13 @@ class SyncRun:
                     # requests (cfg.create_requests); the broad sync = signals only.
                     # 3rd-party (advisor/bank/custodian) senders log a signal but
                     # open no ticket — the feed stays investor inquiries only.
-                    self._create_rfi(created, msg, rfi, cid, oppid)
+                    # …and a follow-up on a thread that already carries an
+                    # open ticket attaches to it rather than opening a second.
+                    merged = self._try_merge_request(msg, conv, snippet)
+                    if merged:
+                        c["rfi_merged"] = c.get("rfi_merged", 0) + 1
+                    else:
+                        self._create_rfi(created, msg, rfi, cid, oppid)
                     rfi_done = True
                 elif third_party_skip and rfi.is_info_request and created \
                         and direction == "Inbound" and not noise_reason:
@@ -863,6 +869,51 @@ class SyncRun:
             return {}
         return {f"{p}statusinferred": self.cfg.choices.statusinferred[label],
                 f"{p}statusprovenance": clip(prov, 2000)}
+
+    def _try_merge_request(self, msg, conv, snippet) -> str | None:
+        """Classifier-gated merge: a follow-up on a thread that already carries
+        an open ticket attaches to that ticket instead of opening a second one.
+        Returns the request id merged into, or None to create a new ticket.
+
+        Deliberately one-sided. No thread, no open candidate, no classifier, a
+        "no", or a low-confidence "yes" all fall through to creating the ticket:
+        a duplicate is a tidiness problem, a swallowed request is not. The
+        prompt is told the same — a thread about arranging one call is one
+        request, but a genuinely new ask in an old thread gets its own.
+        """
+        cfg, p, ch = self.cfg, self.cfg.prefix, self.cfg.choices
+        if not (cfg.merge_requests and conv):
+            return None
+        open_vals = [ch.req_status[k] for k in ("New", "InProgress",
+                                                "WaitingInternal", "WaitingExternal")]
+        cands = self.dv.open_requests_in_conversation(conv, open_vals)
+        if not cands:
+            return None
+        # the newest open ticket on the thread is what a follow-up follows up on
+        cand = max(cands, key=lambda r: r.get(f"{p}receiveddate") or "")
+        rid = cand[f"{p}inforequestid"]
+        verdict = llm.same_request(
+            msg.get("subject") or "", snippet or "",
+            cand.get(f"{p}name") or "",
+            cand.get(f"{p}category@OData.Community.Display.V1.FormattedValue") or "",
+            log=say)
+        if not verdict or not verdict.get("same_request"):
+            return None
+        conf = max(0, min(100, int(verdict.get("confidence") or 0)))
+        if conf < cfg.merge_min_confidence:
+            say(f"merge declined ({conf}% < {cfg.merge_min_confidence}%): "
+                f"{str(verdict.get('reason'))[:60]}")
+            return None
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        body = {f"{p}modifiedbyhint":
+                clip(f"merge|+msg:{msg['_hash'][:12]}|{conf}%|{now}", 200)}
+        # the investor has written again, so a ticket parked on them is live
+        if cand.get(f"{p}status") == ch.req_status["WaitingExternal"]:
+            body[f"{p}status"] = ch.req_status["New"]
+        self.dv.patch(f"{p}inforequests", rid, body,
+                      f"merge msg {msg['_hash'][:8]} into request {rid[:8]} ({conf}%)")
+        say(f"merged into request {rid[:8]} ({conf}%): {str(verdict.get('reason'))[:60]}")
+        return rid
 
     def _create_rfi(self, signal_row, msg, rfi, cid, oppid):
         p, ch, cfg = self.cfg.prefix, self.cfg.choices, self.cfg

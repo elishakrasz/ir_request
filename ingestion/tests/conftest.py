@@ -138,6 +138,11 @@ class FakeDataverse:
         return [dict(r) for r in self.signals.values()
                 if r.get("new_conversationid") == conv_id]
 
+    def open_requests_in_conversation(self, conv_id, open_values):
+        ids = [s["new_engagementsignalid"]
+               for s in self.conversation_signals(conv_id)]
+        return self.requests_for_signals(ids, open_values) if ids else []
+
     def requests_for_signals(self, signal_ids, open_values):
         return [dict(r) for r in self.requests.values()
                 if r.get("_new_sourcesignal_value") in signal_ids

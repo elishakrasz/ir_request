@@ -122,6 +122,10 @@ class Config:
     create_requests: bool = True
     # Scope every active Dynamics contact, not just opportunity-linked ones.
     all_contacts: bool = False
+    # Attach a follow-up to the open ticket on its thread instead of opening a
+    # second one — gated on the classifier agreeing it is the same ask.
+    merge_requests: bool = True
+    merge_min_confidence: int = 70
     # v3 (2026-08-06): tag the engagement signal itself with its LLM category
     # (not just the request). Set True only on the restricted ir@ route; the
     # write is additionally gated by the new_category column existing in the
@@ -166,6 +170,8 @@ class Config:
                           if env.get("INTAKE_FLOOR") else None),
             create_requests=env.get("CREATE_REQUESTS", "1") != "0",
             all_contacts=env.get("ALL_CONTACTS", "0") == "1",
+            merge_requests=env.get("MERGE_REQUESTS", "1") != "0",
+            merge_min_confidence=int(env.get("MERGE_MIN_CONFIDENCE", "70")),
             tag_signal_category=env.get("TAG_SIGNAL_CATEGORY", "0") == "1",
             suppress_third_party_requests=env.get("SUPPRESS_THIRD_PARTY", "0") == "1",
             rules=Rules.load(Path(env.get("RULES_PATH", Path(__file__).parent / "rules.json"))),

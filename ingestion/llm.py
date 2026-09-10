@@ -309,6 +309,44 @@ def _single_call(system: str, schema: dict, prompt: str, cache_prefix: str,
     return data
 
 
+MERGE_SYSTEM = """An investor emailed a private-equity IR team. There is ALREADY an open ticket on the same email thread. Decide whether this new email is the SAME request as that ticket, or a NEW one that deserves its own.
+
+Answer same_request=true ONLY when the new email carries the open ticket's request forward: chasing it, supplying something it asked for, confirming or rescheduling the same meeting, or restating the same ask in other words. A thread about arranging ONE call is one request however many times the time changes.
+
+Answer same_request=false when the sender wants something the open ticket does not cover, even in the same thread: a different document, a different fund, a new question needing separate work. When the two asks could be worked by different people or closed at different times, they are different requests.
+
+If unsure, answer false. A duplicate ticket is a tidiness problem; a request swallowed inside an unrelated ticket is a lost one.
+
+confidence is 0-100 in same_request. reason: one short clause."""
+
+MERGE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "same_request": {"type": "boolean"},
+        # no minimum/maximum: structured outputs reject range keywords on
+        # integers ("For 'integer' type, properties maximum, minimum are
+        # not supported"). The caller clamps instead.
+        "confidence": {"type": "integer"},
+        "reason": {"type": "string"},
+    },
+    "required": ["same_request", "confidence", "reason"],
+    "additionalProperties": False,
+}
+
+
+def same_request(subject: str, body: str, open_title: str,
+                 open_category: str = "", log=print) -> dict | None:
+    """Is this new email the same ask as the open ticket already on its thread?"""
+    cat = f" [{open_category}]" if open_category else ""
+    prompt = f"""OPEN TICKET{cat}: {open_title}
+
+NEW EMAIL
+Subject: {subject}
+
+{body}"""
+    return _single_call(MERGE_SYSTEM, MERGE_SCHEMA, prompt, "merge:", log)
+
+
 def classify_promotion(subject: str, snippet: str, log=print) -> dict | None:
     """§0.2/§2.2: title + 4-way routing + fine category + urgency for a
     request-flagged signal being promoted to an Information Request."""
