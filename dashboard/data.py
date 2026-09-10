@@ -5,6 +5,7 @@ writes are the two audited confirm-click actions (spec Phase 4): updating an
 Information Request's status/owner and confirming/excluding a signal's
 opportunity — every write stamps modifiedbyhint with the human's identity.
 """
+import re
 import sys
 from pathlib import Path
 
@@ -17,6 +18,27 @@ from ingestion.config import Config, STATE_DIR  # noqa: E402
 from ingestion.dataverse_client import DataverseClient  # noqa: E402
 
 FMT = "@OData.Community.Display.V1.FormattedValue"
+
+# LEGACY FALLBACK ONLY. ingestion/sync.py now stamps the mailbox into the link
+# when it writes it, which is the authoritative version — the regex below only
+# matches the bare OWA form, so those correct links are never touched. Rows
+# written before that fix are still bare, and all we have for them is
+# provenance, which names the mailbox that CREATED the row while the link came
+# from the mailbox that last re-synced it: usually the same, not always. Best
+# effort. The viewer also needs delegated access to the mailbox; without it OWA
+# answers accessDenied, which at least names the real problem.
+OWA_BARE = re.compile(r"^(https://outlook\.office(?:365)?\.com/owa/)(\?)", re.I)
+ADDRESS = re.compile(r"^[^\s/?#@]+@[^\s/?#@]+$")
+
+
+def mailbox_deep_link(url: str, mailbox: str) -> str:
+    """Point an Outlook deep link at the mailbox the message was synced from."""
+    if not url or not mailbox:
+        return url or ""
+    mb = mailbox.strip()
+    if not ADDRESS.match(mb):        # guard the shape, never escape into a path
+        return url
+    return OWA_BARE.sub(lambda m: f"{m.group(1)}{mb}/{m.group(2)}", url)
 
 # Run logs written by the two ingestion routes (cron runs on this host).
 RUN_DIRS = {"engagement sync": STATE_DIR / "runs",
@@ -58,7 +80,7 @@ def fetch_signals(dv: DataverseClient, cfg: Config) -> pd.DataFrame:
         f"{p}engagementsignals?$select={p}name,{p}direction,{p}channel,"
         f"{p}timestamputc,{p}sender,{p}snippet,{p}conversationid,{p}rfistatus,"
         f"{p}matchstatus,{p}matchmethod,{p}matchconfidence,{p}responselatencymin,"
-        f"{p}ismeaningful,{p}sourcelink,{p}messagekeyhash,"
+        f"{p}ismeaningful,{p}sourcelink,{p}provenance,{p}messagekeyhash,"
         f"_{p}contact_value,_{p}opportunity_value")
     if not rows:
         return pd.DataFrame()
@@ -76,7 +98,11 @@ def fetch_signals(dv: DataverseClient, cfg: Config) -> pd.DataFrame:
         "confidence": r.get(f"{p}matchconfidence"),
         "latency": r.get(f"{p}responselatencymin"),
         "meaningful": bool(r.get(f"{p}ismeaningful")),
-        "sourcelink": r.get(f"{p}sourcelink") or "",
+        # provenance = "mailbox|runid|codeversion"
+        "mailbox": (r.get(f"{p}provenance") or "").split("|")[0],
+        "sourcelink": mailbox_deep_link(
+            r.get(f"{p}sourcelink") or "",
+            (r.get(f"{p}provenance") or "").split("|")[0]),
         "keyhash": r.get(f"{p}messagekeyhash") or "",
         "contact_id": r.get(f"_{p}contact_value"),
         "contact": r.get(f"_{p}contact_value{FMT}") or "(unknown)",

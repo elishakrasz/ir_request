@@ -33,5 +33,9 @@
   "autoreply_sender_patterns": [
     "no-reply@", "noreply@", "do-not-reply@", "mailer-daemon@", "postmaster@"
   ],
-  "connection_roles": []
+  "connection_roles": [],
+  "_excluded_subject_keywords_note": "Subject line ONLY (excluded_keywords also reads the body preview, which over-matches on signatures and quoted threads). Keeps the HighPost/HIPstr funds off the desk by topic, whoever writes.",
+  "excluded_subject_keywords": [
+    "hipstr", "highpost", "hp fund"
+  ]
 }

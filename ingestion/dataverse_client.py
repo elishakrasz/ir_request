@@ -112,6 +112,14 @@ class DataverseClient:
                 f"emailaddress3&$filter={flt}"))
         return rows
 
+    def fetch_all_contacts(self) -> list[dict]:
+        """Every ACTIVE contact, opportunity-linked or not (ALL_CONTACTS mode).
+        The opportunity-linked set is the subset build_scope still resolves
+        deals for; the rest land in scope with no deal, which is the point."""
+        return self.query(
+            "contacts?$select=contactid,fullname,emailaddress1,emailaddress2,"
+            "emailaddress3&$filter=statecode eq 0")
+
     def has_attribute(self, entity_logical: str, attr_logical: str) -> bool:
         """Metadata probe, cached per run. Lets sync write columns that exist in
         DEV but haven't reached PROD via manual solution import yet (the same

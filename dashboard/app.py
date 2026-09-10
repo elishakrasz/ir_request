@@ -130,7 +130,10 @@ def timeline(sigs: pd.DataFrame, limit=60):
                        f"match: {r['matchstatus']}/{r['matchmethod'] or '—'}")
             st.write(r["snippet"][:600] or "_no preview_")
             if r["sourcelink"]:
-                st.caption(f"[open in mailbox (owner only)]({r['sourcelink']})")
+                mb = r.get("mailbox") or ""
+                st.caption(
+                    f"[open in Outlook{' · ' + mb if mb else ''}]({r['sourcelink']})"
+                    + (" — needs delegated access to that mailbox" if mb else ""))
 
 
 def weekly_activity(sigs: pd.DataFrame):

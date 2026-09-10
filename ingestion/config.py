@@ -35,11 +35,17 @@ class Rules:
     autoreply_subject_prefixes: list = field(default_factory=list)
     autoreply_sender_patterns: list = field(default_factory=list)
     connection_roles: list = field(default_factory=list)
+    # Dropped on the SUBJECT LINE ONLY (excluded_keywords also reads the body
+    # preview, which over-matches on signatures and quoted threads). Used to
+    # keep the HighPost / HIPstr funds out of the desk by topic, whoever writes.
+    excluded_subject_keywords: list = field(default_factory=list)
 
     @classmethod
     def load(cls, path: Path):
         raw = json.loads(path.read_text())
-        raw.pop("_comment", None)
+        # Any "_"-prefixed key is an operator annotation, not a rule — JSON has
+        # no comments and this file is meant to be edited by hand.
+        raw = {k: v for k, v in raw.items() if not k.startswith("_")}
         return cls(**raw)
 
 
@@ -114,6 +120,8 @@ class Config:
     # Option-B split: only the restricted IR-request route creates Information
     # Requests. The broad engagement sync sets this False (signals only).
     create_requests: bool = True
+    # Scope every active Dynamics contact, not just opportunity-linked ones.
+    all_contacts: bool = False
     # v3 (2026-08-06): tag the engagement signal itself with its LLM category
     # (not just the request). Set True only on the restricted ir@ route; the
     # write is additionally gated by the new_category column existing in the
@@ -157,6 +165,7 @@ class Config:
                           .replace(tzinfo=timezone.utc)
                           if env.get("INTAKE_FLOOR") else None),
             create_requests=env.get("CREATE_REQUESTS", "1") != "0",
+            all_contacts=env.get("ALL_CONTACTS", "0") == "1",
             tag_signal_category=env.get("TAG_SIGNAL_CATEGORY", "0") == "1",
             suppress_third_party_requests=env.get("SUPPRESS_THIRD_PARTY", "0") == "1",
             rules=Rules.load(Path(env.get("RULES_PATH", Path(__file__).parent / "rules.json"))),

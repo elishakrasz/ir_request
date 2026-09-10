@@ -11,6 +11,7 @@ Usage:
 import argparse
 import hashlib
 import json
+import re
 import subprocess
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -53,6 +54,28 @@ FOLDERS = ("inbox", "sentitems")
 # later-pass / human updates (no-silent-mutation, house rule 2).
 STABLE_FIELDS = ("name", "sender", "timestamputc", "conversationid", "sourcelink",
                  "participants", "direction", "snippet", "messagekey", "ismeaningful")
+
+
+# Graph's webLink is the bare OWA form (…/owa/?ItemID=…), which resolves the
+# item against whoever is signed in — so a link to a message in ir@ opens as
+# "This message might have been moved or deleted" for everyone else. OWA opens
+# another mailbox when the address is in the path, so stamp in the mailbox this
+# delta actually came from. Doing it HERE (not in the app layer) is what keeps
+# it correct: provenance is create-time only while sourcelink is a STABLE_FIELD
+# re-patched on every re-sync, so for a message seen by two synced mailboxes the
+# two fields name different mailboxes. The link must carry its own.
+OWA_BARE = re.compile(r"^(https://outlook\.office(?:365)?\.com/owa/)(\?)", re.I)
+ADDRESS = re.compile(r"^[^\s/?#@]+@[^\s/?#@]+$")
+
+
+def mailbox_deep_link(url: str, mailbox: str) -> str:
+    """Point an Outlook deep link at the mailbox the message was read from."""
+    if not url or not mailbox:
+        return url or ""
+    mb = mailbox.strip()
+    if not ADDRESS.match(mb):       # guard the shape, never escape into a path
+        return url
+    return OWA_BARE.sub(lambda m: f"{m.group(1)}{mb}/{m.group(2)}", url)
 
 
 def clip(s: str, limit: int) -> str:
@@ -128,7 +151,8 @@ def code_version() -> str:
         return "dev"
 
 
-def build_scope(opp_rows, conn_rows, contact_rows, roles_by_id=None, allowed_roles=None):
+def build_scope(opp_rows, conn_rows, contact_rows, roles_by_id=None,
+                allowed_roles=None):
     """Pure: raw Dataverse rows → (opp_meta, email_map).
     opp_meta: {oppid: {name, oppcode, aliases[], active, startdate}}
     email_map: {email: (contactid, set(oppids))}"""
@@ -173,13 +197,17 @@ def build_scope(opp_rows, conn_rows, contact_rows, roles_by_id=None, allowed_rol
                 continue
         link(cid, oid)
 
+    # No fund filter here: HighPost/HIPstr are blocked by SUBJECT in
+    # matching.is_excluded, so a contact is never dropped for the deals they
+    # happen to hold — only the mail about those funds is.
     email_map = {}
     for c in contact_rows:
         cid = c["contactid"]
+        oppids = contact_opps.get(cid, set())
         for f in ("emailaddress1", "emailaddress2", "emailaddress3"):
             e = (c.get(f) or "").strip().lower()
             if e:
-                email_map.setdefault(e, (cid, contact_opps.get(cid, set())))
+                email_map.setdefault(e, (cid, oppids))
     return opp_meta, email_map
 
 
@@ -284,7 +312,8 @@ class SyncRun:
             f"{p}matchconfidence": conf,
             f"{p}matchstatus": ch.matchstatus[status],
             f"{p}ismeaningful": meaningful,
-            f"{p}sourcelink": clip(msg.get("webLink") or "", 2000),
+            f"{p}sourcelink": clip(mailbox_deep_link(msg.get("webLink") or "",
+                                                    msg.get("_mailbox") or ""), 2000),
             f"{p}provenance": clip(f"{mailbox}|{self.runid}|{self.codeversion}", 512),
             f"{p}contact@odata.bind": f"/contacts({cid})",
         }
@@ -957,7 +986,15 @@ class SyncRun:
         for cn in conn_rows:
             contact_ids.add(cn["_record1id_value"] if cn.get("record1objecttypecode") == 2
                             else cn["_record2id_value"])
-        contact_rows = self.dv.fetch_contacts([i for i in contact_ids if i])
+        if cfg.all_contacts:
+            # Mail from a known contact is worth capturing whether or not anyone
+            # has linked them to a deal — CRM hygiene was silently deciding what
+            # the desk got to see (Eric Wietschner, 2026-09-10: a live investor
+            # with zero connection rows, whose mail only arrived because someone
+            # in scope happened to be cc'd).
+            contact_rows = self.dv.fetch_all_contacts()
+        else:
+            contact_rows = self.dv.fetch_contacts([i for i in contact_ids if i])
         opp_meta, email_map = build_scope(opp_rows, conn_rows, contact_rows,
                                           roles_by_id, cfg.rules.connection_roles)
         c["scope"] = {"opportunities": len(opp_meta), "contacts": len(contact_rows),

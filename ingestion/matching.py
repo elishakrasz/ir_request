@@ -39,6 +39,9 @@ def is_excluded(sender: str, subject: str, snippet: str, rules: Rules) -> bool:
         return True
     if domain_of(s) in (x.lower() for x in rules.excluded_domains):
         return True
+    subj = (subject or "").lower()
+    if any(k.lower() in subj for k in rules.excluded_subject_keywords):
+        return True         # topic-based block, subject line only
     text = f"{subject} {snippet}".lower()
     return any(k.lower() in text for k in rules.excluded_keywords)
 
