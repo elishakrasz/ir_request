@@ -1059,10 +1059,28 @@ class SyncRun:
             mb, folder = pair
             # one Graph client per worker — requests.Session isn't thread-safe
             g = self.graph.clone() if hasattr(self.graph, "clone") else self.graph
-            return pair, g.delta_messages(mb, folder, self._load_delta(mb, folder))
+            try:
+                return pair, g.delta_messages(mb, folder, self._load_delta(mb, folder)), None
+            except Exception as e:
+                # One unreadable mailbox must not kill the run for the others —
+                # e.g. a newly added mailbox the Application Access Policy does
+                # not cover yet answers 403 on every tick until it propagates.
+                return pair, ([], None, False), e
 
         with ThreadPoolExecutor(max_workers=min(8, len(pairs))) as ex:
-            for (mb, folder), (msgs, link, resynced) in ex.map(walk, pairs):
+            for (mb, folder), (msgs, link, resynced), err in ex.map(walk, pairs):
+                if err is not None:
+                    # Recorded on its own, NOT in c["errors"]: that counter
+                    # withholds delta tokens for every mailbox, and a healthy
+                    # mailbox must keep advancing. The failed pair is simply
+                    # left out of delta_links, so it retries from its last
+                    # token next tick.
+                    c["mailbox_errors"] = c.get("mailbox_errors", 0) + 1
+                    c["mailboxes"][f"{mb}/{folder}"] = {
+                        "fetched": 0, "resynced": False, "error": str(err)[:160]}
+                    self.error_samples.append(f"{mb}/{folder}: {err}")
+                    say(f"delta {mb}/{folder}: FAILED — {str(err)[:100]}")
+                    continue
                 delta_links[(mb, folder)] = link
                 c["mailboxes"][f"{mb}/{folder}"] = {"fetched": len(msgs),
                                                     "resynced": resynced}

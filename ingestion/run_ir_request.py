@@ -38,6 +38,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--months", type=int, default=3)
+    ap.add_argument("--mailbox", action="append",
+                    help="limit this run to specific mailbox(es) — used with "
+                         "--days for a bounded first walk of a newly added one")
     ap.add_argument("--days", type=int, default=None,
                     help="ingest floor in DAYS, overriding --months. For bounded "
                          "re-walks: archive the delta tokens, then re-read with a "
@@ -51,6 +54,8 @@ def main():
     mailboxes = [m.strip().lower() for m in
                  env.get("REQUEST_MAILBOXES", DEFAULT_MAILBOXES).split(",")
                  if m.strip()]
+    if args.mailbox:
+        mailboxes = [m.strip().lower() for m in args.mailbox]
     span = timedelta(days=args.days) if args.days is not None         else timedelta(days=30 * args.months)
     floor = datetime.now(timezone.utc) - span
 
