@@ -22,6 +22,7 @@ CONV = "CONV-SCHEDULING-1"
 def make_run(cfg, tmp_path, dv):
     cfg.create_requests = True
     cfg.intake_mailboxes = []
+    cfg.merge_requests = True          # off by default since 2026-09-15; tests exercise it on
     return SyncRun(cfg, FakeGraph([]), dv, apply=True, state_dir=tmp_path,
                    codeversion="test")
 
@@ -127,7 +128,7 @@ def test_merge_revives_a_ticket_parked_on_the_investor(cfg, tmp_path, monkeypatc
 def test_merge_can_be_switched_off(cfg, tmp_path, monkeypatch):
     dv = FakeDataverse(apply=True); seed_open_ticket(dv)
     verdict(monkeypatch, True)
-    cfg.merge_requests = False
     run = make_run(cfg, tmp_path, dv)
+    cfg.merge_requests = False         # after make_run, which switches it on for the other tests
     run._handle(follow_up(), {}, {}, {}, {})
     assert len(dv.requests) == 2

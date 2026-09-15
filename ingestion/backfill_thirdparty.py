@@ -30,7 +30,8 @@ IR = ("ir@exigentcap.com", "mravid@exigentcap.com", "lgruber@exigentcap.com",
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true")
-    ap.add_argument("--since", default="2026-09-10T00:00:00Z")
+    # default reaches back over the 60-day first walks of kbardash@/ereinhard@
+    ap.add_argument("--since", default="2026-07-16T00:00:00Z")
     args = ap.parse_args()
     env = load_env(); cfg = Config.from_env(env)
     p, ch = cfg.prefix, cfg.choices
@@ -47,8 +48,13 @@ def main():
         f" and {p}ismeaningful eq true and {p}timestamputc ge {args.since}"
         f"&$orderby={p}timestamputc desc")
     sigs = [s for s in sigs if (s.get(f"{p}provenance") or "").split("|")[0] in IR]
-    reqs = dv.query(f"{p}inforequests?$select={p}status,_{p}sourcesignal_value")
+    reqs = dv.query(f"{p}inforequests?$select={p}status,{p}category,_{p}sourcesignal_value,"
+                    f"_{p}contact_value")
     ticketed = {r.get(f"_{p}sourcesignal_value") for r in reqs}
+    # No folding of same-contact/same-category asks (decided 2026-09-15): the
+    # same request reaching several mailboxes opens several tickets, and the
+    # team dismisses what it does not want. Only exact duplicates of one
+    # message (N contact rows) collapse, above.
     open_by_sig = {r.get(f"_{p}sourcesignal_value") for r in reqs
                    if r[f"{p}status"] in open_vals}
 
