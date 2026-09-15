@@ -66,7 +66,11 @@ def main():
         ingest_floor=floor,
         create_requests=True,       # the only route that opens tickets
         tag_signal_category=True,   # v3: category-tag every signal on this route
-        suppress_third_party_requests=True,  # advisors/banks/custodians: no ticket
+        # advisors/banks/custodians: historically no ticket ("investor inquiries
+        # only"). THIRD_PARTY_TICKETS=1 (2026-09-15) opens them too — a custodian
+        # blocking a transfer is work for the team whoever sends it; the ticket
+        # keeps the investor as contact and carries thirdparty=true.
+        suppress_third_party_requests=env.get("THIRD_PARTY_TICKETS", "0") != "1",
     )
 
     # Graph: dedicated restricted app if configured, else main app (dry-run).
